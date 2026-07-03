@@ -21,6 +21,7 @@ import (
 
 	"github.com/sylvester-francis/leash/internal/policy"
 	"github.com/sylvester-francis/rerun"
+	"github.com/sylvester-francis/rerun/postgres"
 	"github.com/sylvester-francis/rerun/sqlite"
 )
 
@@ -59,10 +60,39 @@ func (le *Lease) Release() error {
 	return le.release.Close()
 }
 
-// Open opens (or creates) a SQLite-backed ledger at path, creating the parent
-// directory if needed. The SQLite backend panics on open failure; Open recovers
-// that into an ordinary error so callers never see a panic.
-func Open(path string) (l *Ledger, err error) {
+// Open opens (or creates) a ledger from a data-source string. A dsn beginning
+// with postgres:// or postgresql:// selects the cross-process PostgreSQL backend;
+// anything else is treated as a SQLite file path. Both backends panic on open
+// failure; Open recovers that into an ordinary error so callers never see a
+// panic.
+func Open(dsn string) (*Ledger, error) {
+	if isPostgresDSN(dsn) {
+		return openPostgres(dsn)
+	}
+	return openSQLite(dsn)
+}
+
+// isPostgresDSN reports whether dsn selects the PostgreSQL backend.
+func isPostgresDSN(dsn string) bool {
+	return strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://")
+}
+
+// openPostgres opens the PostgreSQL-backed ledger, recovering the backend's
+// open-failure panic into an error. Its store-wide governance lease is a real
+// cross-process advisory lock, which is what makes active/passive HA possible.
+func openPostgres(dsn string) (l *Ledger, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			l, err = nil, fmt.Errorf("open postgres ledger: %v", r)
+		}
+	}()
+	store := postgres.New(dsn)
+	return &Ledger{store: store, closer: store}, nil
+}
+
+// openSQLite opens (or creates) the SQLite-backed ledger at path, creating the
+// parent directory if needed and recovering the backend's open-failure panic.
+func openSQLite(path string) (l *Ledger, err error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
 			return nil, fmt.Errorf("create ledger directory %s: %w", dir, mkErr)

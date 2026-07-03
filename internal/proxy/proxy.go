@@ -32,6 +32,11 @@ import (
 // this process; a distributed backend would lease per run.
 const governanceLeaseKey = "leash-governor"
 
+// ErrGovernorHeld is returned by New when the ledger's governance lease is
+// already held, meaning another governor is running against the same ledger.
+// serve --standby waits on this error and retries until the lease frees.
+var ErrGovernorHeld = errors.New("proxy: another governor already holds this ledger")
+
 // defaultRunID is used when a request carries no X-Loop-Id and no wrapper
 // default was configured.
 const defaultRunID = "default"
@@ -154,7 +159,7 @@ func New(cfg Config) (*Proxy, error) {
 		return nil, fmt.Errorf("proxy: acquire governance lease: %w", err)
 	}
 	if !acquired {
-		return nil, errors.New("proxy: another governor already holds this ledger in this process")
+		return nil, ErrGovernorHeld
 	}
 	p.lease = lease
 	go p.sweepLoop()

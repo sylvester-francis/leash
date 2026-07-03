@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +23,26 @@ import (
 
 // serveShutdownTimeout bounds graceful shutdown of the standalone server.
 const serveShutdownTimeout = 5 * time.Second
+
+// standbyRetryInterval is how often a --standby instance retries acquiring the
+// governance lease while another instance holds it.
+const standbyRetryInterval = 5 * time.Second
+
+// acquireProxy builds a proxy, honoring --standby. Without standby it returns
+// any error immediately. With standby, when the lease is held by another
+// instance (ErrGovernorHeld) it logs and retries every retry interval until the
+// lease frees, which is the active/passive failover: exactly one instance
+// governs a given ledger, and a warm standby takes over when it steps down.
+func acquireProxy(cfg proxy.Config, standby bool, retry time.Duration, logger *slog.Logger) (*proxy.Proxy, error) {
+	for {
+		p, err := proxy.New(cfg)
+		if err == nil || !standby || !errors.Is(err, proxy.ErrGovernorHeld) {
+			return p, err
+		}
+		logger.Info("ledger governed by another instance; standing by", "retry", retry.String())
+		time.Sleep(retry)
+	}
+}
 
 // parsePositional parses flags that may appear before or after a single
 // positional argument (the run id), returning that positional or empty. The
@@ -144,6 +166,8 @@ func cmdServe(args []string) int {
 		"refuse requests without an X-Loop-Id instead of pooling them into the default run")
 	admin := fs.String("admin", envStr("LEASH_ADMIN", ""),
 		"address for the admin listener serving /healthz, /readyz, /metrics (empty disables)")
+	standby := fs.Bool("standby", envBool("LEASH_STANDBY", false),
+		"wait for the governance lease instead of erroring when another instance holds it (active/passive HA)")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -185,7 +209,10 @@ func cmdServe(args []string) int {
 		observers = append(observers, metrics)
 	}
 
-	p, err := proxy.New(proxy.Config{
+	if *standby {
+		logger.Info("standby mode: will wait for the governance lease", "db", c.db)
+	}
+	p, err := acquireProxy(proxy.Config{
 		Ledger:                l,
 		Governor:              g,
 		Upstream:              upstream,
@@ -195,7 +222,7 @@ func cmdServe(args []string) int {
 		RequireRunID:          *requireRunID,
 		Logger:                logger,
 		Observer:              observers,
-	})
+	}, *standby, standbyRetryInterval, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 1
