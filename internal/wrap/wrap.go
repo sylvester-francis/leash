@@ -20,6 +20,7 @@ import (
 
 	"github.com/sylvester-francis/leash/internal/ledger"
 	"github.com/sylvester-francis/leash/internal/policy"
+	"github.com/sylvester-francis/leash/internal/proxy"
 )
 
 // BoundaryExitCode is the exit status leash uses when a boundary stopped the
@@ -80,7 +81,10 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("wrap: listen: %w", err)
 	}
 	baseURL := "http://" + ln.Addr().String()
-	srv := &http.Server{Handler: opts.Handler}
+	// Even the embedded, loopback-only server gets the request-hardening timeouts,
+	// so the two server construction sites cannot drift; the empty address is
+	// unused because it is driven by Serve on an existing listener.
+	srv := proxy.HardenedServer("", opts.Handler)
 	go func() { _ = srv.Serve(ln) }()
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)

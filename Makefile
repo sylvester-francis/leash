@@ -5,7 +5,7 @@ GO ?= go
 BINARY := leash
 PKG := ./...
 
-.PHONY: all build vet test race cover mutate ascii-check tidy fmt clean
+.PHONY: all build vet test race cover mutate fuzz ascii-check tidy fmt clean
 
 all: build vet test ascii-check
 
@@ -47,6 +47,16 @@ mutate:
 
 mutate-all:
 	gremlins unleash --timeout-coefficient 30 ./...
+
+# Fuzz the parsers, leash's attack surface. Native Go fuzzing runs one target
+# per invocation, so iterate over the three. FUZZTIME keeps each run short enough
+# for CI; raise it for a deeper local soak (e.g. make fuzz FUZZTIME=2m).
+FUZZTIME ?= 15s
+fuzz:
+	@for fz in FuzzParseUsageJSON FuzzStreamMeterTee FuzzInjectIncludeUsage; do \
+		echo "== $$fz =="; \
+		$(GO) test ./internal/meter/ -run '^$$' -fuzz "^$$fz$$" -fuzztime $(FUZZTIME) || exit 1; \
+	done
 
 # Fail on any non-ASCII byte in .go and .md files. Tabs and newlines are
 # allowed; everything outside printable ASCII plus tab is rejected.

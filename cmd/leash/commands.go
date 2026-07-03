@@ -64,6 +64,10 @@ func cmdRun(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
+	if c.run != "" && !policy.ValidRunID(c.run) {
+		fmt.Fprintf(os.Stderr, "leash: invalid --run %q: %s\n", c.run, policy.RunIDRule)
+		return 1
+	}
 	command := fs.Args()
 	if len(command) == 0 {
 		fmt.Fprintln(os.Stderr, "leash: no command; usage: leash [flags] -- <command> [args...]")
@@ -96,12 +100,14 @@ func cmdRun(args []string) int {
 	defer l.Close()
 
 	p, err := proxy.New(proxy.Config{
-		Ledger:     l,
-		Governor:   g,
-		DefaultRun: runID,
-		Upstream:   upstream,
-		Inject:     !c.noInject,
-		Logger:     log.New(os.Stderr, "leash: ", 0),
+		Ledger:                l,
+		Governor:              g,
+		DefaultRun:            runID,
+		Upstream:              upstream,
+		Inject:                !c.noInject,
+		MaxBodyBytes:          c.maxBodyBytes,
+		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
+		Logger:                log.New(os.Stderr, "leash: ", 0),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
@@ -128,6 +134,8 @@ func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("leash serve", flag.ContinueOnError)
 	c := registerCommon(fs)
 	listen := fs.String("listen", ":8088", "address to listen on")
+	requireRunID := fs.Bool("require-run-id", false,
+		"refuse requests without an X-Loop-Id instead of pooling them into the default run")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -154,11 +162,14 @@ func cmdServe(args []string) int {
 
 	logger := log.New(os.Stderr, "leash: ", 0)
 	p, err := proxy.New(proxy.Config{
-		Ledger:   l,
-		Governor: g,
-		Upstream: upstream,
-		Inject:   !c.noInject,
-		Logger: logger,
+		Ledger:                l,
+		Governor:              g,
+		Upstream:              upstream,
+		Inject:                !c.noInject,
+		MaxBodyBytes:          c.maxBodyBytes,
+		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
+		RequireRunID:          *requireRunID,
+		Logger:                logger,
 		// StopLine already carries the "leash: " prefix, so print it straight to
 		// stderr rather than through the prefixed logger (which would double it).
 		OnStop: func(s *policy.State) { fmt.Fprintln(os.Stderr, policy.StopLine(s)) },
@@ -169,7 +180,7 @@ func cmdServe(args []string) int {
 	}
 	defer p.Shutdown()
 
-	srv := &http.Server{Addr: *listen, Handler: p}
+	srv := proxy.HardenedServer(*listen, p)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {

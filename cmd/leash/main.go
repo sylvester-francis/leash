@@ -71,12 +71,14 @@ type commonFlags struct {
 	deadline    time.Duration
 	rate        string
 	stall       int
-	prices      string
-	computeRate float64
-	upstream    string
-	db          string
-	run         string
-	noInject    bool
+	prices                string
+	computeRate           float64
+	upstream              string
+	db                    string
+	run                   string
+	noInject              bool
+	maxBodyBytes          int64
+	upstreamHeaderTimeout time.Duration
 }
 
 // registerCommon binds the shared flags with their documented defaults.
@@ -93,6 +95,9 @@ func registerCommon(fs *flag.FlagSet) *commonFlags {
 	fs.StringVar(&c.db, "db", defaultDBPath(), "ledger database path")
 	fs.StringVar(&c.run, "run", "", "run name; reusing it on a later invocation resumes that budget")
 	fs.BoolVar(&c.noInject, "no-inject", false, "do not add stream_options.include_usage to streaming requests")
+	fs.Int64Var(&c.maxBodyBytes, "max-body-bytes", 10485760, "cap on an incoming request body in bytes (10 MiB default)")
+	fs.DurationVar(&c.upstreamHeaderTimeout, "upstream-header-timeout", 5*time.Minute,
+		"how long the upstream may take to send response headers (0 disables; the body stream is never capped)")
 	return c
 }
 

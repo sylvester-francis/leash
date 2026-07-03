@@ -17,6 +17,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -33,6 +34,11 @@ const governanceLeaseKey = "leash-governor"
 // defaultRunID is used when a request carries no X-Loop-Id and no wrapper
 // default was configured.
 const defaultRunID = "default"
+
+// defaultMaxBodyBytes caps an incoming request body at 10 MiB when the caller
+// does not set Config.MaxBodyBytes. The cap only guards the request read; a
+// streamed response is never buffered and never capped.
+const defaultMaxBodyBytes = 10 * 1024 * 1024
 
 // Default upstreams inferred per provider when no --upstream override is set.
 var (
@@ -55,9 +61,21 @@ type Config struct {
 	// Inject enables rewriting streaming OpenAI requests to ask for a usage
 	// chunk (stream_options.include_usage). The CLI's --no-inject clears it.
 	Inject bool
-	// Client is the upstream HTTP client; nil uses a no-timeout client so long
-	// streams are not cut off.
+	// Client is the upstream HTTP client; nil builds a hardened client from
+	// UpstreamHeaderTimeout with no overall timeout so long streams are not cut
+	// off.
 	Client *http.Client
+	// UpstreamHeaderTimeout bounds how long the upstream may take to send
+	// response headers on the default client (zero disables it). It is ignored
+	// when Client is set explicitly.
+	UpstreamHeaderTimeout time.Duration
+	// MaxBodyBytes caps the request body read; zero uses defaultMaxBodyBytes. A
+	// request over the cap is refused 413. It never touches response streaming.
+	MaxBodyBytes int64
+	// RequireRunID refuses requests that carry no X-Loop-Id with a 400 instead
+	// of pooling them into the default run. It closes the shared-gateway footgun
+	// where one stopped default run would 419 all untagged traffic forever.
+	RequireRunID bool
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Logger receives redacted operational logs; nil discards them.
@@ -100,7 +118,10 @@ func New(cfg Config) (*Proxy, error) {
 		cfg.Now = time.Now
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{}
+		cfg.Client = newUpstreamClient(cfg.UpstreamHeaderTimeout)
+	}
+	if cfg.MaxBodyBytes == 0 {
+		cfg.MaxBodyBytes = defaultMaxBodyBytes
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = log.New(io.Discard, "", 0)
@@ -129,10 +150,28 @@ func (p *Proxy) Shutdown() error {
 	return nil
 }
 
-// ServeHTTP governs one request.
+// ServeHTTP governs one request. It recovers from any panic in the request
+// path (belt and braces: the path has no panics today) so a single bad request
+// can never take the whole gateway down, logging the stack with no request data
+// and returning a 500 leash_gateway error.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			// Log the panic and stack only; never the request, headers, or body.
+			p.cfg.Logger.Printf("panic recovered in request path: %v\n%s", rec, debug.Stack())
+			p.writeGatewayError(w, http.StatusInternalServerError, "internal error")
+		}
+	}()
+	p.serve(w, r)
+}
+
+// serve governs one request without the panic guard.
+func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	runID := resolveRunID(r, p.cfg.DefaultRun)
+	runID, ok := p.resolveRunID(w, r)
+	if !ok {
+		return
+	}
 	provider := meter.DetectProvider(r.URL.Path, r.Header)
 
 	rs := p.runStateFor(runID)
@@ -188,8 +227,19 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Cap the request read so a hostile or buggy client cannot exhaust memory.
+	// MaxBytesReader guards only this read; the response stream below is never
+	// wrapped and never buffered.
+	r.Body = http.MaxBytesReader(w, r.Body, p.cfg.MaxBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var mbErr *http.MaxBytesError
+		if errors.As(err, &mbErr) {
+			p.writeGatewayError(w, http.StatusRequestEntityTooLarge,
+				"request body exceeds the --max-body-bytes limit")
+			p.cfg.Logger.Printf("run %s: request body over the %d byte cap", runID, p.cfg.MaxBodyBytes)
+			return
+		}
 		p.writeGatewayError(w, http.StatusBadRequest, "could not read request body")
 		return
 	}
@@ -307,16 +357,29 @@ func (p *Proxy) buildUpstreamRequest(ctx context.Context, r *http.Request, base 
 	return req, nil
 }
 
-// resolveRunID resolves the run: X-Loop-Id, else the wrapper default, else
-// "default".
-func resolveRunID(r *http.Request, defaultRun string) string {
+// resolveRunID resolves the run from the request, validating any client-supplied
+// id at the door. A present but malformed X-Loop-Id is refused 400 (this also
+// blocks log injection via header newlines). A missing X-Loop-Id under
+// RequireRunID is refused 400; otherwise it falls back to the wrapper default or
+// "default", both of which are already well formed. It returns ok false when it
+// has written an error and the caller must stop.
+func (p *Proxy) resolveRunID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if id := r.Header.Get("X-Loop-Id"); id != "" {
-		return id
+		if !policy.ValidRunID(id) {
+			p.writeGatewayError(w, http.StatusBadRequest, "invalid X-Loop-Id run id")
+			return "", false
+		}
+		return id, true
 	}
-	if defaultRun != "" {
-		return defaultRun
+	if p.cfg.RequireRunID {
+		p.writeGatewayError(w, http.StatusBadRequest,
+			"missing X-Loop-Id and this gateway requires one (--require-run-id)")
+		return "", false
 	}
-	return defaultRunID
+	if p.cfg.DefaultRun != "" {
+		return p.cfg.DefaultRun, true
+	}
+	return defaultRunID, true
 }
 
 // boundaryBody is the 429 JSON leash returns when a boundary trips.

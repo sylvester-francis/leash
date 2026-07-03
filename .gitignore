@@ -16,5 +16,4 @@ coverage.out
 .DS_Store
 
 # Build guides are not part of the application and must not be committed.
-leash-application-build-prompt.md
-leash-teaching-module-build-prompt.md
+*-build-prompt.md
