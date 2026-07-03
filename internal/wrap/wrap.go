@@ -28,8 +28,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/sylvester-francis/leash/internal/ledger"
@@ -166,30 +164,6 @@ func injectBaseURLs(env []string, baseURL string) []string {
 		"OPENAI_API_BASE="+baseURL+"/v1",
 		"ANTHROPIC_BASE_URL="+baseURL,
 	)
-}
-
-// forwardSignals relays interrupt and termination signals to the child and
-// returns a function that stops relaying.
-func forwardSignals(cmd *exec.Cmd) (stop func()) {
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case sig := <-sigCh:
-				if cmd.Process != nil {
-					_ = cmd.Process.Signal(sig)
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-	return func() {
-		signal.Stop(sigCh)
-		close(done)
-	}
 }
 
 // exitCodeFrom extracts the child's exit code. A process killed by a signal

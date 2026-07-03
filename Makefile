@@ -5,9 +5,9 @@ GO ?= go
 BINARY := leash
 PKG := ./...
 
-.PHONY: all build vet test race cover mutate fuzz bench ascii-check tidy fmt clean
+.PHONY: all build vet test race cover mutate fuzz bench ascii-check doc-check docker tidy fmt clean
 
-all: build vet test ascii-check
+all: build vet test ascii-check doc-check
 
 build:
 	$(GO) build $(PKG)
@@ -63,6 +63,15 @@ fuzz:
 # state the machine when reporting them, and report only measured numbers.
 bench:
 	$(GO) test -run '^$$' -bench . -benchmem ./internal/policy/ ./internal/meter/ ./internal/proxy/
+
+# Fail on any undocumented exported symbol (std-lib AST walker, no deps).
+doc-check:
+	$(GO) run ./tools/doccheck .
+
+# Build the distroless container image, stamping the version from git.
+IMAGE ?= leash:dev
+docker:
+	docker build -t $(IMAGE) --build-arg VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) .
 
 # Fail on any non-ASCII byte in .go and .md files. Tabs and newlines are
 # allowed; everything outside printable ASCII plus tab is rejected.
