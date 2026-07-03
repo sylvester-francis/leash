@@ -11,12 +11,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sylvester-francis/leash/internal/policy"
 )
+
+// version is the leash build version. It is "dev" for an unstamped local build
+// and is set at release time via -ldflags "-X main.version=...".
+var version = "dev"
 
 func main() {
 	os.Exit(dispatch(os.Args[1:]))
@@ -40,12 +45,21 @@ func dispatch(args []string) int {
 		return cmdKill(args[1:])
 	case "run":
 		return cmdRun(args[1:])
+	case "version", "--version":
+		return cmdVersion()
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 		return 0
 	default:
 		return cmdRun(args)
 	}
+}
+
+// cmdVersion prints the build version, Go version, and platform on one line, for
+// example "leash v0.1.0 go1.25.0 linux/amd64".
+func cmdVersion() int {
+	fmt.Printf("leash %s %s %s/%s\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	return 0
 }
 
 // usage prints the top-level help.
@@ -55,11 +69,14 @@ func usage(w *os.File) {
 Usage:
   leash [flags] -- <command> [args...]   wrap an agent (Tier 1)
   leash serve --listen :8088 [flags]     standalone gateway (Tier 2)
-  leash ps                               list runs from the ledger
-  leash inspect <run>                    show one run's folded journal
+  leash ps [--json]                      list runs from the ledger
+  leash inspect [--json] <run>           show one run's folded journal
   leash kill <run>                       durably stop a run on its next call
+  leash version                          print the build version
 
 Flags are per-subcommand (pass -h after a subcommand); see the README for the full list.
+Every shared flag also reads a LEASH_-prefixed environment variable (for example
+--max-cost reads LEASH_MAX_COST); an explicit flag beats the environment.
 `)
 }
 
@@ -79,25 +96,29 @@ type commonFlags struct {
 	noInject              bool
 	maxBodyBytes          int64
 	upstreamHeaderTimeout time.Duration
+	logLevel              string
+	logFormat             string
 }
 
 // registerCommon binds the shared flags with their documented defaults.
 func registerCommon(fs *flag.FlagSet) *commonFlags {
 	c := &commonFlags{}
-	fs.Float64Var(&c.maxCost, "max-cost", 5.00, "dollar budget over token + compute cost (0 disables)")
-	fs.Int64Var(&c.maxCalls, "max-calls", 100, "maximum governed calls (0 disables)")
-	fs.DurationVar(&c.deadline, "deadline", 30*time.Minute, "wall-clock budget from the first call (0 disables)")
-	fs.StringVar(&c.rate, "rate", "", "trailing token rate as tokens/window, e.g. 100000/1m (empty disables)")
-	fs.IntVar(&c.stall, "stall", 0, "consecutive identical responses tolerated (0 disables)")
-	fs.StringVar(&c.prices, "prices", "", "path to a JSON price table (model -> input/output/reasoning per million)")
-	fs.Float64Var(&c.computeRate, "compute-rate", 0, "compute meter in dollars per hour")
-	fs.StringVar(&c.upstream, "upstream", "", "upstream base URL override (empty infers per provider)")
-	fs.StringVar(&c.db, "db", defaultDBPath(), "ledger database path")
-	fs.StringVar(&c.run, "run", "", "run name; reusing it on a later invocation resumes that budget")
-	fs.BoolVar(&c.noInject, "no-inject", false, "do not add stream_options.include_usage to streaming requests")
-	fs.Int64Var(&c.maxBodyBytes, "max-body-bytes", 10485760, "cap on an incoming request body in bytes (10 MiB default)")
-	fs.DurationVar(&c.upstreamHeaderTimeout, "upstream-header-timeout", 5*time.Minute,
+	fs.Float64Var(&c.maxCost, "max-cost", envFloat("LEASH_MAX_COST", 5.00), "dollar budget over token + compute cost (0 disables)")
+	fs.Int64Var(&c.maxCalls, "max-calls", envInt64("LEASH_MAX_CALLS", 100), "maximum governed calls (0 disables)")
+	fs.DurationVar(&c.deadline, "deadline", envDuration("LEASH_DEADLINE", 30*time.Minute), "wall-clock budget from the first call (0 disables)")
+	fs.StringVar(&c.rate, "rate", envStr("LEASH_RATE", ""), "trailing token rate as tokens/window, e.g. 100000/1m (empty disables)")
+	fs.IntVar(&c.stall, "stall", envInt("LEASH_STALL", 0), "consecutive identical responses tolerated (0 disables)")
+	fs.StringVar(&c.prices, "prices", envStr("LEASH_PRICES", ""), "path to a JSON price table (model -> input/output/reasoning per million)")
+	fs.Float64Var(&c.computeRate, "compute-rate", envFloat("LEASH_COMPUTE_RATE", 0), "compute meter in dollars per hour")
+	fs.StringVar(&c.upstream, "upstream", envStr("LEASH_UPSTREAM", ""), "upstream base URL override (empty infers per provider)")
+	fs.StringVar(&c.db, "db", envStr("LEASH_DB", defaultDBPath()), "ledger database path")
+	fs.StringVar(&c.run, "run", envStr("LEASH_RUN", ""), "run name; reusing it on a later invocation resumes that budget")
+	fs.BoolVar(&c.noInject, "no-inject", envBool("LEASH_NO_INJECT", false), "do not add stream_options.include_usage to streaming requests")
+	fs.Int64Var(&c.maxBodyBytes, "max-body-bytes", envInt64("LEASH_MAX_BODY_BYTES", 10485760), "cap on an incoming request body in bytes (10 MiB default)")
+	fs.DurationVar(&c.upstreamHeaderTimeout, "upstream-header-timeout", envDuration("LEASH_UPSTREAM_HEADER_TIMEOUT", 5*time.Minute),
 		"how long the upstream may take to send response headers (0 disables; the body stream is never capped)")
+	fs.StringVar(&c.logLevel, "log-level", envStr("LEASH_LOG_LEVEL", "info"), "log level: debug, info, warn, or error")
+	fs.StringVar(&c.logFormat, "log-format", envStr("LEASH_LOG_FORMAT", "text"), "log format: text or json")
 	return c
 }
 

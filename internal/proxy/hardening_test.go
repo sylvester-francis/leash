@@ -14,7 +14,7 @@ import (
 
 // buildProxy stands up a Proxy over a temp ledger and a fake upstream, applying
 // tweak to the Config before New. It returns a front server the test drives.
-func buildProxy(t *testing.T, tweak func(*Config)) (*httptest.Server, *upstreamRecorder) {
+func buildProxy(t *testing.T, tweak func(*Config)) (*httptest.Server, *upstreamRecorder, *Proxy) {
 	t.Helper()
 	db := filepath.Join(t.TempDir(), "leash.db")
 	l, err := ledger.Open(db)
@@ -44,7 +44,7 @@ func buildProxy(t *testing.T, tweak func(*Config)) (*httptest.Server, *upstreamR
 		upSrv.Close()
 		_ = l.Close()
 	})
-	return front, up
+	return front, up, p
 }
 
 // postBody posts a raw body with optional headers and returns status and body.
@@ -77,7 +77,7 @@ func postBody(t *testing.T, front *httptest.Server, header http.Header, body str
 }
 
 func TestMaxBodyBytesOverCapRefused413(t *testing.T) {
-	front, up := buildProxy(t, func(c *Config) { c.MaxBodyBytes = 64 })
+	front, up, _ := buildProxy(t, func(c *Config) { c.MaxBodyBytes = 64 })
 	big := `{"model":"gpt-4o","pad":"` + strings.Repeat("x", 200) + `"}`
 	code, body := postBody(t, front, nil, big)
 	if code != http.StatusRequestEntityTooLarge {
@@ -93,7 +93,7 @@ func TestMaxBodyBytesOverCapRefused413(t *testing.T) {
 
 func TestMaxBodyBytesJustUnderCapSucceeds(t *testing.T) {
 	body := `{"model":"gpt-4o"}` // 18 bytes
-	front, up := buildProxy(t, func(c *Config) { c.MaxBodyBytes = int64(len(body)) })
+	front, up, _ := buildProxy(t, func(c *Config) { c.MaxBodyBytes = int64(len(body)) })
 	code, _ := postBody(t, front, nil, body)
 	if code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 for a body at the cap", code)
@@ -104,12 +104,10 @@ func TestMaxBodyBytesJustUnderCapSucceeds(t *testing.T) {
 }
 
 func TestInvalidRunIDHeaderRefused400(t *testing.T) {
-	front, up := buildProxy(t, nil)
-	// A newline is rejected client- and server-side before it ever reaches the
-	// handler, so the transmittable-but-invalid cases here are what the handler
-	// itself must reject; ValidRunID's unit test covers newline rejection.
-	// Transmittable-but-invalid header values (a newline is blocked before it
-	// reaches the handler; non-ASCII rejection is covered by ValidRunID's test).
+	front, up, _ := buildProxy(t, nil)
+	// A newline is rejected client- and server-side before it reaches the handler,
+	// and non-ASCII rejection is covered by ValidRunID's unit test; the cases here
+	// are transmittable header values the handler itself must reject.
 	for _, bad := range []string{"has space", "../traversal", "a;b", "a+b"} {
 		code, body := postBody(t, front, http.Header{"X-Loop-Id": {bad}}, `{"model":"gpt-4o"}`)
 		if code != http.StatusBadRequest {
@@ -125,7 +123,7 @@ func TestInvalidRunIDHeaderRefused400(t *testing.T) {
 }
 
 func TestValidRunIDHeaderAccepted(t *testing.T) {
-	front, up := buildProxy(t, nil)
+	front, up, _ := buildProxy(t, nil)
 	code, _ := postBody(t, front, http.Header{"X-Loop-Id": {"good.run_1-2"}}, `{"model":"gpt-4o"}`)
 	if code != http.StatusOK {
 		t.Fatalf("valid run id status = %d, want 200", code)
@@ -136,7 +134,7 @@ func TestValidRunIDHeaderAccepted(t *testing.T) {
 }
 
 func TestRequireRunIDRefusesUntagged(t *testing.T) {
-	front, up := buildProxy(t, func(c *Config) { c.RequireRunID = true })
+	front, up, _ := buildProxy(t, func(c *Config) { c.RequireRunID = true })
 	// No X-Loop-Id: refused.
 	code, body := postBody(t, front, nil, `{"model":"gpt-4o"}`)
 	if code != http.StatusBadRequest {
@@ -156,7 +154,7 @@ func TestRequireRunIDRefusesUntagged(t *testing.T) {
 }
 
 func TestRequireRunIDOffPoolsUntagged(t *testing.T) {
-	front, _ := buildProxy(t, nil) // default: require-run-id off
+	front, _, _ := buildProxy(t, nil) // default: require-run-id off
 	code, _ := postBody(t, front, nil, `{"model":"gpt-4o"}`)
 	if code != http.StatusOK {
 		t.Fatalf("untagged request status = %d, want 200 when require-run-id is off", code)
@@ -172,7 +170,7 @@ func (panicRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 func TestPanicRecoveryReturns500(t *testing.T) {
-	front, _ := buildProxy(t, func(c *Config) {
+	front, _, _ := buildProxy(t, func(c *Config) {
 		c.Client = &http.Client{Transport: panicRoundTripper{}}
 	})
 	code, body := postBody(t, front, nil, `{"model":"gpt-4o"}`)

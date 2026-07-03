@@ -13,12 +13,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sylvester-francis/leash/internal/ledger"
@@ -78,11 +79,12 @@ type Config struct {
 	RequireRunID bool
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
-	// Logger receives redacted operational logs; nil discards them.
-	Logger *log.Logger
-	// OnStop, if set, is called once with the final state when a run stops. It
-	// is the observer seam for the CLI to print the stop line.
-	OnStop func(*policy.State)
+	// Logger receives redacted structured logs; nil discards them. Header values
+	// and bodies are never logged, at any level.
+	Logger *slog.Logger
+	// Observer receives governance events (forwarded, refused, stopped, upstream
+	// error); nil installs NopObserver. It subsumes the former OnStop callback.
+	Observer Observer
 }
 
 // Proxy governs model calls for one ledger. It is safe for concurrent use:
@@ -95,13 +97,25 @@ type Proxy struct {
 	mu          sync.Mutex
 	runs        map[string]*runState
 	warnedBlind map[string]bool
+
+	// stopSweep stops the idle-run eviction goroutine on Shutdown.
+	stopSweep chan struct{}
+	sweepOnce sync.Once
 }
 
 // runState serializes access to one run and remembers whether it has been
-// created in the ledger yet.
+// created in the ledger yet. The eviction fields are read by the sweeper without
+// taking mu, so they are atomics: a request updates lastActiveNanos on every
+// touch and sets stopped when the run reaches a terminal state, and the sweeper
+// evicts a run that has been stopped and idle past the eviction window. This is
+// safe because the journal is the source of truth: a later call to an evicted
+// run cold-reloads it and still gets the same stop answer.
 type runState struct {
 	mu      sync.Mutex
 	ensured bool
+
+	lastActiveNanos atomic.Int64
+	stopped         atomic.Bool
 }
 
 // New builds a Proxy and claims the ledger's governance lease. It returns an
@@ -124,12 +138,16 @@ func New(cfg Config) (*Proxy, error) {
 		cfg.MaxBodyBytes = defaultMaxBodyBytes
 	}
 	if cfg.Logger == nil {
-		cfg.Logger = log.New(io.Discard, "", 0)
+		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if cfg.Observer == nil {
+		cfg.Observer = NopObserver{}
 	}
 	p := &Proxy{
 		cfg:         cfg,
 		runs:        make(map[string]*runState),
 		warnedBlind: make(map[string]bool),
+		stopSweep:   make(chan struct{}),
 	}
 	lease, acquired, err := cfg.Ledger.Acquire(context.Background(), governanceLeaseKey)
 	if err != nil {
@@ -139,11 +157,14 @@ func New(cfg Config) (*Proxy, error) {
 		return nil, errors.New("proxy: another governor already holds this ledger in this process")
 	}
 	p.lease = lease
+	go p.sweepLoop()
 	return p, nil
 }
 
-// Shutdown releases the governance lease. The Proxy must not be used after.
+// Shutdown releases the governance lease and stops the eviction sweeper. The
+// Proxy must not be used after.
 func (p *Proxy) Shutdown() error {
+	p.sweepOnce.Do(func() { close(p.stopSweep) })
 	if p.lease != nil {
 		return p.lease.Release()
 	}
@@ -158,7 +179,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			// Log the panic and stack only; never the request, headers, or body.
-			p.cfg.Logger.Printf("panic recovered in request path: %v\n%s", rec, debug.Stack())
+			p.cfg.Logger.Error("panic recovered in request path",
+				"panic", rec, "stack", string(debug.Stack()))
 			p.writeGatewayError(w, http.StatusInternalServerError, "internal error")
 		}
 	}()
@@ -179,10 +201,11 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	defer rs.mu.Unlock()
 
 	now := p.cfg.Now()
+	rs.lastActiveNanos.Store(now.UnixNano())
 	if !rs.ensured {
 		if err := p.cfg.Ledger.EnsureRun(ctx, runID, now); err != nil {
 			p.writeGatewayError(w, http.StatusInternalServerError, "ledger unavailable")
-			p.cfg.Logger.Printf("run %s: ensure failed: %v", runID, err)
+			p.cfg.Logger.Error("ensure run failed", "run", runID, "err", err)
 			return
 		}
 		rs.ensured = true
@@ -191,24 +214,27 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	state, err := p.cfg.Ledger.Load(ctx, runID, p.cfg.Governor)
 	if err != nil {
 		p.writeGatewayError(w, http.StatusInternalServerError, "ledger unavailable")
-		p.cfg.Logger.Printf("run %s: load failed: %v", runID, err)
+		p.cfg.Logger.Error("load run failed", "run", runID, "err", err)
 		return
 	}
 
 	// A run already stopped stays stopped: every later call gets the same answer.
 	if state.StopReason != "" {
+		rs.stopped.Store(true)
+		p.cfg.Observer.CallRefused(provider, state.StopReason)
 		writeBoundary(w, state)
 		return
 	}
 
 	if reason, tripped := p.cfg.Governor.Evaluate(state, now); tripped {
 		state.StopReason = reason
+		rs.stopped.Store(true)
 		if err := p.cfg.Ledger.AppendStop(ctx, runID, state, now); err != nil {
-			p.cfg.Logger.Printf("run %s: record stop failed: %v", runID, err)
+			p.cfg.Logger.Error("record stop failed", "run", runID, "err", err)
 		}
-		if p.cfg.OnStop != nil {
-			p.cfg.OnStop(state)
-		}
+		p.cfg.Observer.RunStopped(state)
+		p.cfg.Observer.CallRefused(provider, reason)
+		p.cfg.Logger.Info("run stopped", "run", runID, "reason", reason, "calls", state.Calls)
 		writeBoundary(w, state)
 		return
 	}
@@ -223,7 +249,7 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	if base == nil {
 		p.writeGatewayError(w, http.StatusBadGateway,
 			"leash could not determine an upstream for this endpoint; set --upstream")
-		p.cfg.Logger.Printf("run %s: no upstream for path %s", runID, r.URL.Path)
+		p.cfg.Logger.Error("no upstream for endpoint", "run", runID, "path", r.URL.Path)
 		return
 	}
 
@@ -237,7 +263,7 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		if errors.As(err, &mbErr) {
 			p.writeGatewayError(w, http.StatusRequestEntityTooLarge,
 				"request body exceeds the --max-body-bytes limit")
-			p.cfg.Logger.Printf("run %s: request body over the %d byte cap", runID, p.cfg.MaxBodyBytes)
+			p.cfg.Logger.Warn("request body over cap", "run", runID, "cap_bytes", p.cfg.MaxBodyBytes)
 			return
 		}
 		p.writeGatewayError(w, http.StatusBadRequest, "could not read request body")
@@ -245,7 +271,7 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 	if p.cfg.Inject && provider == meter.OpenAI {
 		if out, changed, injErr := meter.InjectIncludeUsage(body); injErr != nil {
-			p.cfg.Logger.Printf("run %s: include_usage injection skipped: %v", runID, injErr)
+			p.cfg.Logger.Debug("include_usage injection skipped", "run", runID, "err", injErr)
 		} else if changed {
 			body = out
 		}
@@ -254,14 +280,15 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	outReq, err := p.buildUpstreamRequest(ctx, r, base, body)
 	if err != nil {
 		p.writeGatewayError(w, http.StatusInternalServerError, "could not build upstream request")
-		p.cfg.Logger.Printf("run %s: build upstream request: %v", runID, err)
+		p.cfg.Logger.Error("build upstream request failed", "run", runID, "err", err)
 		return
 	}
 
 	resp, err := p.cfg.Client.Do(outReq)
 	if err != nil {
 		p.writeGatewayError(w, http.StatusBadGateway, "upstream request failed")
-		p.cfg.Logger.Printf("run %s: upstream error: %v", runID, err)
+		p.cfg.Logger.Error("upstream request failed", "run", runID, "err", err)
+		p.cfg.Observer.UpstreamError()
 		return
 	}
 	defer resp.Body.Close()
@@ -273,20 +300,22 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	if meter.IsSSE(resp.Header.Get("Content-Type")) {
 		sm := meter.NewStreamMeter(provider)
 		if teeErr := sm.Tee(newFlushWriter(w), resp.Body); teeErr != nil {
-			p.cfg.Logger.Printf("run %s: stream tee error: %v", runID, teeErr)
+			p.cfg.Logger.Error("stream tee error", "run", runID, "err", teeErr)
+			p.cfg.Observer.UpstreamError()
 		}
 		result = sm.Result()
 	} else {
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			p.cfg.Logger.Printf("run %s: read response error: %v", runID, readErr)
+			p.cfg.Logger.Error("read response error", "run", runID, "err", readErr)
+			p.cfg.Observer.UpstreamError()
 		}
 		if _, wErr := w.Write(respBody); wErr != nil {
-			p.cfg.Logger.Printf("run %s: write response error: %v", runID, wErr)
+			p.cfg.Logger.Error("write response error", "run", runID, "err", wErr)
 		}
 		result, err = meter.ParseUsageJSON(provider, respBody)
 		if err != nil {
-			p.cfg.Logger.Printf("run %s: parse usage error: %v", runID, err)
+			p.cfg.Logger.Warn("parse usage error", "run", runID, "err", err)
 		}
 	}
 
@@ -295,11 +324,13 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	at := p.cfg.Now()
 	rec := policy.CallRecord{Usage: result.Usage, Fingerprint: result.Fingerprint, At: at}
 	if appendErr := p.cfg.Ledger.AppendCall(ctx, runID, state.Calls, rec); appendErr != nil {
-		p.cfg.Logger.Printf("run %s: record call failed: %v", runID, appendErr)
+		p.cfg.Logger.Error("record call failed", "run", runID, "err", appendErr)
 	}
-	if !result.HasUsage && provider != meter.Unknown {
+	blind := !result.HasUsage && provider != meter.Unknown
+	if blind {
 		p.warnBlind(runID)
 	}
+	p.cfg.Observer.CallForwarded(provider, result.Usage, blind)
 }
 
 // runStateFor returns the per-run serializer, creating it on first touch.
@@ -314,6 +345,71 @@ func (p *Proxy) runStateFor(runID string) *runState {
 	return rs
 }
 
+// Eviction bounds the per-run memory a long-lived serve holds. The runs and
+// warnedBlind maps would otherwise grow without limit on a shared gateway.
+const (
+	// evictionIdleWindow is how long a stopped run may sit idle before its
+	// in-memory entries are dropped.
+	evictionIdleWindow = 10 * time.Minute
+	// evictionSweepInterval is how often the sweeper checks for evictable runs.
+	evictionSweepInterval = time.Minute
+)
+
+// sweepLoop evicts stopped, idle runs from memory on a fixed interval until
+// Shutdown closes stopSweep.
+func (p *Proxy) sweepLoop() {
+	t := time.NewTicker(evictionSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-p.stopSweep:
+			return
+		case <-t.C:
+			p.evictIdle(p.cfg.Now())
+		}
+	}
+}
+
+// evictIdle drops the in-memory entries of every run that has stopped and has
+// been idle at least evictionIdleWindow, returning how many it evicted. This is
+// safe precisely because the journal is the source of truth: a later call to an
+// evicted run cold-reloads it from the ledger and still gets the same stop
+// answer. It reads the per-run eviction fields as atomics, so it never needs a
+// runState's own lock and cannot deadlock against an in-flight request.
+func (p *Proxy) evictIdle(now time.Time) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	evicted := 0
+	for id, rs := range p.runs {
+		if !rs.stopped.Load() {
+			continue
+		}
+		if now.Sub(time.Unix(0, rs.lastActiveNanos.Load())) >= evictionIdleWindow {
+			delete(p.runs, id)
+			delete(p.warnedBlind, id)
+			evicted++
+		}
+	}
+	if evicted > 0 {
+		p.cfg.Logger.Debug("evicted stopped idle runs from memory", "count", evicted)
+	}
+	return evicted
+}
+
+// ActiveRuns reports the number of in-memory runs that are not stopped. It backs
+// the leash_active_runs gauge; per-run detail lives in the ledger, never here.
+func (p *Proxy) ActiveRuns() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, rs := range p.runs {
+		if !rs.stopped.Load() {
+			n++
+		}
+	}
+	return n
+}
+
 // warnBlind logs the blind-token-meter warning once per run.
 func (p *Proxy) warnBlind(runID string) {
 	p.mu.Lock()
@@ -322,7 +418,7 @@ func (p *Proxy) warnBlind(runID string) {
 		return
 	}
 	p.warnedBlind[runID] = true
-	p.cfg.Logger.Printf("run %s: token meter blind (no usage on the wire); relying on other boundaries", runID)
+	p.cfg.Logger.Warn("token meter blind (no usage on the wire); relying on other boundaries", "run", runID)
 }
 
 // upstreamFor returns the base URL for a provider, preferring the override.

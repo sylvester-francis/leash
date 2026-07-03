@@ -177,6 +177,20 @@ func (l *Ledger) Finish(ctx context.Context, runID string, ok bool) error {
 	return nil
 }
 
+// pingProbeRun is a sentinel run id whose (always empty) journal a readiness
+// probe loads to confirm the ledger is reachable without listing real runs.
+const pingProbeRun = "__leash_readyz_probe__"
+
+// Ping performs a cheap durable read to confirm the ledger is reachable. It
+// backs the admin /readyz check: loading a sentinel run's (empty) journal
+// touches the store without depending on how many real runs exist.
+func (l *Ledger) Ping(ctx context.Context) error {
+	if _, err := l.store.LoadLogs(ctx, pingProbeRun); err != nil {
+		return fmt.Errorf("ledger ping: %w", err)
+	}
+	return nil
+}
+
 // Incomplete lists the runs still active (Pending or Running), which is the set
 // `leash ps` folds and displays.
 func (l *Ledger) Incomplete(ctx context.Context) ([]rerun.Run, error) {

@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -92,6 +92,12 @@ func cmdRun(args []string) int {
 		runID = shortID()
 	}
 
+	logger, err := buildLogger(c.logLevel, c.logFormat, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
+		return 2
+	}
+
 	l, err := ledger.Open(c.db)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
@@ -107,7 +113,7 @@ func cmdRun(args []string) int {
 		Inject:                !c.noInject,
 		MaxBodyBytes:          c.maxBodyBytes,
 		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
-		Logger:                log.New(os.Stderr, "leash: ", 0),
+		Logger:                logger,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
@@ -133,9 +139,11 @@ func cmdRun(args []string) int {
 func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("leash serve", flag.ContinueOnError)
 	c := registerCommon(fs)
-	listen := fs.String("listen", ":8088", "address to listen on")
-	requireRunID := fs.Bool("require-run-id", false,
+	listen := fs.String("listen", envStr("LEASH_LISTEN", ":8088"), "address to listen on")
+	requireRunID := fs.Bool("require-run-id", envBool("LEASH_REQUIRE_RUN_ID", false),
 		"refuse requests without an X-Loop-Id instead of pooling them into the default run")
+	admin := fs.String("admin", envStr("LEASH_ADMIN", ""),
+		"address for the admin listener serving /healthz, /readyz, /metrics (empty disables)")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -160,7 +168,23 @@ func cmdServe(args []string) int {
 	}
 	defer l.Close()
 
-	logger := log.New(os.Stderr, "leash: ", 0)
+	logger, err := buildLogger(c.logLevel, c.logFormat, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
+		return 2
+	}
+
+	// The stop line is printed straight to stderr (not through the structured
+	// logger) so it keeps its exact human-readable "leash: stopped run ..." form.
+	observers := proxy.MultiObserver{
+		proxy.StopLineObserver(func(s *policy.State) { fmt.Fprintln(os.Stderr, policy.StopLine(s)) }),
+	}
+	var metrics *proxy.Metrics
+	if *admin != "" {
+		metrics = proxy.NewMetrics(version, g.Prices)
+		observers = append(observers, metrics)
+	}
+
 	p, err := proxy.New(proxy.Config{
 		Ledger:                l,
 		Governor:              g,
@@ -170,9 +194,7 @@ func cmdServe(args []string) int {
 		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
 		RequireRunID:          *requireRunID,
 		Logger:                logger,
-		// StopLine already carries the "leash: " prefix, so print it straight to
-		// stderr rather than through the prefixed logger (which would double it).
-		OnStop: func(s *policy.State) { fmt.Fprintln(os.Stderr, policy.StopLine(s)) },
+		Observer:              observers,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
@@ -183,16 +205,33 @@ func cmdServe(args []string) int {
 	srv := proxy.HardenedServer(*listen, p)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The admin listener (health, readiness, metrics) runs on its own address so
+	// it never collides with proxied API paths and can be network-segmented.
+	var adminSrv *http.Server
+	if *admin != "" {
+		adminSrv = proxy.NewAdminServer(*admin, l, p, metrics)
+		go func() {
+			if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("admin server error", "err", err)
+			}
+		}()
+		logger.Info("admin listener started", "addr", *admin)
+	}
+
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), serveShutdownTimeout)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
+		if adminSrv != nil {
+			_ = adminSrv.Shutdown(shutCtx)
+		}
 	}()
 
-	logger.Printf("serving on %s (db %s)", *listen, c.db)
+	logger.Info("serving", "version", version, "addr", *listen, "db", c.db)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Printf("server error: %v", err)
+		logger.Error("server error", "err", err)
 		return 1
 	}
 	return 0
@@ -202,6 +241,7 @@ func cmdServe(args []string) int {
 func cmdPs(args []string) int {
 	fs := flag.NewFlagSet("leash ps", flag.ContinueOnError)
 	c := registerCommon(fs)
+	asJSON := fs.Bool("json", false, "emit a stable JSON array instead of a human table")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -222,13 +262,8 @@ func cmdPs(args []string) int {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 1
 	}
-	if len(runs) == 0 {
-		fmt.Println("leash: no active runs")
-		return 0
-	}
 
-	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tCALLS\tTOKENS$\tCOMPUTE$\tTOTAL$\tSTATUS\tREASON")
+	summaries := make([]runJSON, 0, len(runs))
 	for _, r := range runs {
 		s, err := l.Load(context.Background(), r.ID, g)
 		if err != nil {
@@ -237,10 +272,34 @@ func cmdPs(args []string) int {
 		if s.StopReason == "" {
 			s.Refresh(time.Now(), g.ComputeRate)
 		}
+		summaries = append(summaries, toRunJSON(s))
+	}
+
+	if *asJSON {
+		return encodeJSON(summaries)
+	}
+	if len(summaries) == 0 {
+		fmt.Println("leash: no active runs")
+		return 0
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "RUN\tCALLS\tTOKENS$\tCOMPUTE$\tTOTAL$\tSTATUS\tREASON")
+	for _, s := range summaries {
 		fmt.Fprintf(tw, "%s\t%d\t%.2f\t%.2f\t%.2f\t%s\t%s\n",
-			r.ID, s.Calls, s.TokenCost, s.ComputeCost, s.TotalCost, runStatus(s), s.StopReason)
+			s.Run, s.Calls, s.TokenCost, s.ComputeCost, s.TotalCost, s.Status, s.Reason)
 	}
 	_ = tw.Flush()
+	return 0
+}
+
+// encodeJSON writes v as indented JSON to stdout, returning a CLI exit code.
+func encodeJSON(v any) int {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintf(os.Stderr, "leash: encode json: %v\n", err)
+		return 1
+	}
 	return 0
 }
 
@@ -260,6 +319,7 @@ func runStatus(s *policy.State) string {
 func cmdInspect(args []string) int {
 	fs := flag.NewFlagSet("leash inspect", flag.ContinueOnError)
 	c := registerCommon(fs)
+	asJSON := fs.Bool("json", false, "emit a stable JSON object instead of a human report")
 	runID, err := parsePositional(fs, args)
 	if err != nil {
 		return flagExit(err)
@@ -290,12 +350,21 @@ func cmdInspect(args []string) int {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 1
 	}
+	if s.StopReason == "" {
+		s.Refresh(time.Now(), g.ComputeRate)
+	}
+
+	if *asJSON {
+		out := inspectJSON{runJSON: toRunJSON(s), Entries: make([]entryJSON, 0, len(entries))}
+		for _, e := range entries {
+			out.Entries = append(out.Entries, toEntryJSON(e))
+		}
+		return encodeJSON(out)
+	}
+
 	if len(entries) == 0 {
 		fmt.Printf("leash: no journal for run %s\n", runID)
 		return 0
-	}
-	if s.StopReason == "" {
-		s.Refresh(time.Now(), g.ComputeRate)
 	}
 
 	fmt.Printf("run %s  status %s  calls %d\n", runID, runStatus(s), s.Calls)
@@ -329,7 +398,7 @@ func entryDetail(e ledger.Entry) string {
 // cmdKill durably stops a run on its next call, working from a second process.
 func cmdKill(args []string) int {
 	fs := flag.NewFlagSet("leash kill", flag.ContinueOnError)
-	db := fs.String("db", defaultDBPath(), "ledger database path")
+	db := fs.String("db", envStr("LEASH_DB", defaultDBPath()), "ledger database path")
 	runID, err := parsePositional(fs, args)
 	if err != nil {
 		return flagExit(err)

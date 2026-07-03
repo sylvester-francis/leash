@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -104,7 +104,7 @@ func newHarness(t *testing.T, limits policy.Limits, prices policy.PriceTable, in
 		Governor: g,
 		Upstream: upURL,
 		Inject:   inject,
-		Logger:   log.New(logs, "", 0),
+		Logger:   slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Now:      clock.now,
 	})
 	if err != nil {
