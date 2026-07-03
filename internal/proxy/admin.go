@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package proxy
 
 import (
@@ -7,28 +21,23 @@ import (
 	"time"
 )
 
-// readyTimeout bounds the ledger probe behind /readyz: readiness must be a
-// quick, cheap check, not a place a slow database can hang a load balancer.
+// readyTimeout bounds the /readyz ledger probe.
 const readyTimeout = time.Second
 
-// LedgerPinger is the readiness dependency: a cheap durable read that succeeds
-// when the ledger is reachable. *ledger.Ledger satisfies it.
+// LedgerPinger is the readiness dependency; *ledger.Ledger satisfies it.
 type LedgerPinger interface {
 	Ping(ctx context.Context) error
 }
 
-// ActiveRunsSource supplies the live active-run count for the metrics gauge.
-// *Proxy satisfies it.
+// ActiveRunsSource supplies the active-run gauge; *Proxy satisfies it.
 type ActiveRunsSource interface {
 	ActiveRuns() int
 }
 
-// NewAdminServer builds the admin HTTP server: GET /healthz (liveness, always
-// 200), GET /readyz (200 when a ledger probe succeeds within readyTimeout, else
-// 503), and GET /metrics (Prometheus text exposition). It is a separate server
-// from the proxy listener so it never collides with proxied API paths and can be
-// placed on its own network segment. metrics may be nil, in which case /metrics
-// returns an empty body.
+// NewAdminServer builds the admin server: GET /healthz (always 200), /readyz
+// (200 when the ledger probe succeeds within readyTimeout, else 503), and
+// /metrics. It is separate from the proxy listener so it never collides with
+// proxied paths and can be network-segmented. metrics may be nil.
 func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, metrics *Metrics) *http.Server {
 	mux := http.NewServeMux()
 
@@ -62,8 +71,7 @@ func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, m
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		// The exposition version is part of the historical Prometheus text
-		// format contract; scrapers key off it.
+		// version=0.0.4 is the Prometheus text-format contract scrapers key off.
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		if metrics != nil {
 			metrics.WriteTo(w, active.ActiveRuns())

@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package proxy
 
 import (
@@ -12,15 +26,11 @@ import (
 	"github.com/sylvester-francis/leash/internal/policy"
 )
 
-// Metrics is a hand-rolled Prometheus registry and an Observer. It exposes the
-// gateway's counters and gauges in the Prometheus text exposition format with no
-// third-party dependency.
-//
-// Cardinality is bounded by construction: the only labels are a fixed decision
-// (forwarded or refused), the small provider enumeration, a fixed token kind,
-// and the boundary reason set. There is deliberately NO run-id label anywhere;
-// run ids are unbounded-cardinality identifiers, and per-run accounting already
-// lives in the ledger (that is what `leash ps` reads).
+// Metrics is a hand-rolled Prometheus registry and an Observer, with no
+// third-party dependency. Cardinality is bounded by construction: the only
+// labels are the fixed decision, provider, token-kind, and reason sets. There is
+// no run-id label anywhere; run ids are unbounded and per-run data lives in the
+// ledger.
 type Metrics struct {
 	version string
 	prices  policy.PriceTable
@@ -37,9 +47,9 @@ type Metrics struct {
 	upstreamErrors int64
 }
 
-// NewMetrics returns an empty registry stamped with the build version. The price
-// table is used to attribute a dollar cost to each forwarded call's tokens; a
-// nil table leaves the token-cost counter at zero (leash never invents a price).
+// NewMetrics returns an empty registry stamped with version. The price table
+// attributes a dollar cost to forwarded tokens; a nil table leaves the cost
+// counter at zero (leash never invents a price).
 func NewMetrics(version string, prices policy.PriceTable) *Metrics {
 	return &Metrics{
 		version:        version,
@@ -64,9 +74,8 @@ func (m *Metrics) CallForwarded(p meter.Provider, u policy.Usage, blind bool) {
 	}
 }
 
-// CallRefused records a call refused by a boundary. The reason drives
-// leash_stops_total via RunStopped, so it is not labelled here (that would
-// double the boundary dimension onto an unbounded call counter).
+// CallRefused records a refused call. The reason is not labelled here; it drives
+// leash_stops_total via RunStopped instead.
 func (m *Metrics) CallRefused(p meter.Provider, _ string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -87,9 +96,8 @@ func (m *Metrics) UpstreamError() {
 	m.upstreamErrors++
 }
 
-// WriteTo renders the current metrics in Prometheus text exposition format. The
-// activeRuns gauge is passed in because that live count is owned by the Proxy,
-// not accumulated here.
+// WriteTo renders the metrics in Prometheus text format. activeRuns is passed in
+// because that live count is owned by the Proxy, not accumulated here.
 func (m *Metrics) WriteTo(w io.Writer, activeRuns int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -139,9 +147,7 @@ func (m *Metrics) WriteTo(w io.Writer, activeRuns int) {
 	_, _ = io.WriteString(w, b.String())
 }
 
-// sortedKeys returns a map's keys in ascending order so the exposition output is
-// stable across renders (Prometheus does not require order, but stability makes
-// the output diffable and testable).
+// sortedKeys returns a map's keys sorted, so the exposition output is stable.
 func sortedKeys(m map[string]int64) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -151,10 +157,8 @@ func sortedKeys(m map[string]int64) []string {
 	return keys
 }
 
-// escapeLabel escapes a Prometheus label value: backslash, double quote, and
-// newline. The provider, decision, kind, and reason labels are drawn from fixed
-// internal enumerations and need no escaping, but the version string is
-// build-supplied, so it is escaped here.
+// escapeLabel escapes a Prometheus label value (backslash, quote, newline). Only
+// the build-supplied version string needs it; the other labels are fixed enums.
 func escapeLabel(v string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 	return r.Replace(v)

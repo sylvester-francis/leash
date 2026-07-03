@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package proxy
 
 import (
@@ -5,31 +19,22 @@ import (
 	"github.com/sylvester-francis/leash/internal/policy"
 )
 
-// Observer is the side channel for governance events. It subsumes the older
-// OnStop callback: the CLI's stop-line printer and the metrics registry are both
-// Observers. Every method must be safe for concurrent use; the zero cost of the
-// default (NopObserver) means the proxy can always call it unconditionally.
-//
-// Deliberately, no method carries a run id. Run ids are unbounded-cardinality
-// identifiers; per-run accounting already lives in the ledger (that is what
-// `leash ps` reads). Keeping ids out of this seam keeps metrics cardinality
-// bounded by construction.
+// Observer is the side channel for governance events; it subsumes the old
+// OnStop callback. Methods must be safe for concurrent use. No method carries a
+// run id on purpose: run ids are unbounded cardinality, and per-run accounting
+// lives in the ledger.
 type Observer interface {
-	// CallForwarded is reported once per call sent upstream, with the metered
-	// usage and whether the token meter was blind (no usage on the wire).
+	// CallForwarded reports a call sent upstream, with its usage and blindness.
 	CallForwarded(provider meter.Provider, usage policy.Usage, blind bool)
-	// CallRefused is reported once per call refused by a boundary, whether the
-	// boundary tripped on this call or the run was already stopped.
+	// CallRefused reports a call a boundary refused (freshly or already stopped).
 	CallRefused(provider meter.Provider, reason string)
-	// RunStopped is reported once, at the moment a run transitions to stopped.
+	// RunStopped reports a run's transition to stopped.
 	RunStopped(state *policy.State)
-	// UpstreamError is reported when a forwarded call fails to reach the upstream
-	// or read its response.
+	// UpstreamError reports a failed upstream request or response read.
 	UpstreamError()
 }
 
-// NopObserver is the default Observer: it ignores every event. It is the value
-// New installs when Config.Observer is nil.
+// NopObserver ignores every event. New installs it when Config.Observer is nil.
 type NopObserver struct{}
 
 // CallForwarded ignores the event.
@@ -44,8 +49,7 @@ func (NopObserver) RunStopped(*policy.State) {}
 // UpstreamError ignores the event.
 func (NopObserver) UpstreamError() {}
 
-// MultiObserver fans one event out to several Observers in order. It lets serve
-// run the metrics registry and the stop-line printer from the single seam.
+// MultiObserver fans each event out to several Observers in order.
 type MultiObserver []Observer
 
 // CallForwarded forwards to each observer.
@@ -76,8 +80,7 @@ func (m MultiObserver) UpstreamError() {
 	}
 }
 
-// stopLineObserver adapts a stop-line callback to the Observer seam, so the CLI
-// can keep printing exactly one line when a run stops.
+// stopLineObserver adapts a stop-line callback to the Observer seam.
 type stopLineObserver struct {
 	onStop func(*policy.State)
 }
@@ -95,7 +98,6 @@ func (o stopLineObserver) RunStopped(s *policy.State) { o.onStop(s) }
 func (stopLineObserver) UpstreamError() {}
 
 // StopLineObserver returns an Observer that calls onStop once when a run stops.
-// It is the replacement for the former Config.OnStop callback.
 func StopLineObserver(onStop func(*policy.State)) Observer {
 	return stopLineObserver{onStop: onStop}
 }

@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package proxy is leash's enforcement engine: an HTTP reverse proxy that
 // governs every model call. For each incoming request it resolves a run, folds
 // that run's durable journal into state, evaluates the boundaries in a fixed
@@ -41,9 +55,8 @@ var ErrGovernorHeld = errors.New("proxy: another governor already holds this led
 // default was configured.
 const defaultRunID = "default"
 
-// defaultMaxBodyBytes caps an incoming request body at 10 MiB when the caller
-// does not set Config.MaxBodyBytes. The cap only guards the request read; a
-// streamed response is never buffered and never capped.
+// defaultMaxBodyBytes caps a request body at 10 MiB when Config.MaxBodyBytes is
+// unset. It guards the request read only; responses are never capped.
 const defaultMaxBodyBytes = 10 * 1024 * 1024
 
 // Default upstreams inferred per provider when no --upstream override is set.
@@ -75,12 +88,11 @@ type Config struct {
 	// response headers on the default client (zero disables it). It is ignored
 	// when Client is set explicitly.
 	UpstreamHeaderTimeout time.Duration
-	// MaxBodyBytes caps the request body read; zero uses defaultMaxBodyBytes. A
-	// request over the cap is refused 413. It never touches response streaming.
+	// MaxBodyBytes caps the request body read (zero uses defaultMaxBodyBytes);
+	// over-cap requests get 413. It never touches response streaming.
 	MaxBodyBytes int64
-	// RequireRunID refuses requests that carry no X-Loop-Id with a 400 instead
-	// of pooling them into the default run. It closes the shared-gateway footgun
-	// where one stopped default run would 419 all untagged traffic forever.
+	// RequireRunID refuses untagged requests with 400 instead of pooling them
+	// into the default run.
 	RequireRunID bool
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
@@ -108,16 +120,15 @@ type Proxy struct {
 	sweepOnce sync.Once
 }
 
-// runState serializes access to one run and remembers whether it has been
-// created in the ledger yet. The eviction fields are read by the sweeper without
-// taking mu, so they are atomics: a request updates lastActiveNanos on every
-// touch and sets stopped when the run reaches a terminal state, and the sweeper
-// evicts a run that has been stopped and idle past the eviction window. This is
-// safe because the journal is the source of truth: a later call to an evicted
-// run cold-reloads it and still gets the same stop answer.
+// runState serializes access to one run and caches its folded state (the warm
+// path). state is nil until the first touch cold-loads it. The eviction fields
+// are atomics so the sweeper can read them without taking mu (avoiding a
+// lock-order inversion with warnBlind).
 type runState struct {
 	mu      sync.Mutex
 	ensured bool
+	state   *policy.State
+	lastSeq int // highest journal seq known; -1 until cold-loaded
 
 	lastActiveNanos atomic.Int64
 	stopped         atomic.Bool
@@ -176,10 +187,9 @@ func (p *Proxy) Shutdown() error {
 	return nil
 }
 
-// ServeHTTP governs one request. It recovers from any panic in the request
-// path (belt and braces: the path has no panics today) so a single bad request
-// can never take the whole gateway down, logging the stack with no request data
-// and returning a 500 leash_gateway error.
+// ServeHTTP governs one request, recovering any panic in the request path into
+// a 500 (logging the stack with no request data) so one bad request cannot take
+// the gateway down.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -216,7 +226,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		rs.ensured = true
 	}
 
-	state, err := p.cfg.Ledger.Load(ctx, runID, p.cfg.Governor)
+	state, err := p.stateFor(ctx, rs, runID)
 	if err != nil {
 		p.writeGatewayError(w, http.StatusInternalServerError, "ledger unavailable")
 		p.cfg.Logger.Error("load run failed", "run", runID, "err", err)
@@ -244,12 +254,48 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.forward(ctx, w, r, runID, provider, state)
+	p.forward(ctx, w, r, runID, provider, rs)
+}
+
+// stateFor returns the run's folded state. On the cold path (first touch or
+// after eviction) it folds the whole journal once and caches it. On the warm
+// path it reuses the cache and only checks the durable cancel flag (an O(1)
+// indexed read) to catch a kill, folding new calls in as they happen. When the
+// store cannot serve the flag, or the probe fails, it falls back to a full
+// reload. Correct because one governor owns the ledger: no other writer appends
+// calls out of band, and kills also set the flag.
+func (p *Proxy) stateFor(ctx context.Context, rs *runState, runID string) (*policy.State, error) {
+	if rs.state == nil {
+		return p.coldLoad(ctx, rs, runID)
+	}
+	s := rs.state
+	if s.StopReason == "" && !s.Killed {
+		requested, supported, err := p.cfg.Ledger.CancelRequested(ctx, runID)
+		switch {
+		case !supported || err != nil:
+			return p.coldLoad(ctx, rs, runID)
+		case requested:
+			s.Killed = true
+		}
+	}
+	return s, nil
+}
+
+// coldLoad folds the whole journal and seeds the cache and append hint.
+func (p *Proxy) coldLoad(ctx context.Context, rs *runState, runID string) (*policy.State, error) {
+	s, lastSeq, err := p.cfg.Ledger.LoadAt(ctx, runID, p.cfg.Governor)
+	if err != nil {
+		return nil, err
+	}
+	rs.state = s
+	rs.lastSeq = lastSeq
+	return s, nil
 }
 
 // forward sends the request upstream, streams the response to the client, meters
 // usage, and records the call in the ledger.
-func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Request, runID string, provider meter.Provider, state *policy.State) {
+func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Request, runID string, provider meter.Provider, rs *runState) {
+	state := rs.state
 	base := p.upstreamFor(provider)
 	if base == nil {
 		p.writeGatewayError(w, http.StatusBadGateway,
@@ -328,8 +374,14 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	// undercounts by one call (safe) but can never double count.
 	at := p.cfg.Now()
 	rec := policy.CallRecord{Usage: result.Usage, Fingerprint: result.Fingerprint, At: at}
-	if appendErr := p.cfg.Ledger.AppendCall(ctx, runID, state.Calls, rec); appendErr != nil {
+	if usedSeq, appendErr := p.cfg.Ledger.AppendCallAt(ctx, runID, state.Calls, rec, rs.lastSeq+1); appendErr != nil {
 		p.cfg.Logger.Error("record call failed", "run", runID, "err", appendErr)
+	} else {
+		// Fold into the warm cache and advance the seq hint so the next call needs
+		// neither a reload nor a re-read. state is the cached pointer, so the cache
+		// stays equal to a cold fold of the journal.
+		rs.lastSeq = usedSeq
+		p.cfg.Governor.Fold(state, rec)
 	}
 	blind := !result.HasUsage && provider != meter.Unknown
 	if blind {
@@ -350,18 +402,13 @@ func (p *Proxy) runStateFor(runID string) *runState {
 	return rs
 }
 
-// Eviction bounds the per-run memory a long-lived serve holds. The runs and
-// warnedBlind maps would otherwise grow without limit on a shared gateway.
+// Eviction bounds the per-run memory a long-lived serve holds.
 const (
-	// evictionIdleWindow is how long a stopped run may sit idle before its
-	// in-memory entries are dropped.
-	evictionIdleWindow = 10 * time.Minute
-	// evictionSweepInterval is how often the sweeper checks for evictable runs.
+	evictionIdleWindow    = 10 * time.Minute // stopped-and-idle before eviction
 	evictionSweepInterval = time.Minute
 )
 
-// sweepLoop evicts stopped, idle runs from memory on a fixed interval until
-// Shutdown closes stopSweep.
+// sweepLoop evicts stopped, idle runs on a fixed interval until Shutdown.
 func (p *Proxy) sweepLoop() {
 	t := time.NewTicker(evictionSweepInterval)
 	defer t.Stop()
@@ -375,12 +422,9 @@ func (p *Proxy) sweepLoop() {
 	}
 }
 
-// evictIdle drops the in-memory entries of every run that has stopped and has
-// been idle at least evictionIdleWindow, returning how many it evicted. This is
-// safe precisely because the journal is the source of truth: a later call to an
-// evicted run cold-reloads it from the ledger and still gets the same stop
-// answer. It reads the per-run eviction fields as atomics, so it never needs a
-// runState's own lock and cannot deadlock against an in-flight request.
+// evictIdle drops in-memory entries for runs stopped and idle at least
+// evictionIdleWindow, returning the count. Safe because the journal is the
+// source of truth: a later call cold-reloads and gets the same stop answer.
 func (p *Proxy) evictIdle(now time.Time) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -401,8 +445,8 @@ func (p *Proxy) evictIdle(now time.Time) int {
 	return evicted
 }
 
-// ActiveRuns reports the number of in-memory runs that are not stopped. It backs
-// the leash_active_runs gauge; per-run detail lives in the ledger, never here.
+// ActiveRuns reports the in-memory runs that are not stopped, backing the
+// leash_active_runs gauge.
 func (p *Proxy) ActiveRuns() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -458,12 +502,10 @@ func (p *Proxy) buildUpstreamRequest(ctx context.Context, r *http.Request, base 
 	return req, nil
 }
 
-// resolveRunID resolves the run from the request, validating any client-supplied
-// id at the door. A present but malformed X-Loop-Id is refused 400 (this also
-// blocks log injection via header newlines). A missing X-Loop-Id under
-// RequireRunID is refused 400; otherwise it falls back to the wrapper default or
-// "default", both of which are already well formed. It returns ok false when it
-// has written an error and the caller must stop.
+// resolveRunID resolves and validates the run for a request. A malformed
+// X-Loop-Id is refused 400; a missing one under RequireRunID is refused 400;
+// otherwise it falls back to the wrapper default or "default". ok is false when
+// an error was written and the caller must stop.
 func (p *Proxy) resolveRunID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if id := r.Header.Get("X-Loop-Id"); id != "" {
 		if !policy.ValidRunID(id) {

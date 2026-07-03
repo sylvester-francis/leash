@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -8,12 +22,9 @@ import (
 )
 
 // Environment fallbacks. Every shared flag reads a LEASH_-prefixed variable
-// named mechanically from the flag: --max-cost reads LEASH_MAX_COST, --db reads
-// LEASH_DB, and so on. Precedence is explicit flag, then environment, then the
-// built-in default. This is implemented by using the environment value (when
-// set) as the flag's default, so an explicit flag on the command line still
-// wins. A malformed environment value is reported and the built-in default is
-// used, rather than failing the whole command on a stray variable.
+// (--max-cost reads LEASH_MAX_COST, and so on). Precedence is flag, then env,
+// then default: the env value becomes the flag default, so an explicit flag
+// still wins. A malformed value is reported and the default used.
 
 // envStr returns the environment value for name, or def when it is unset.
 func envStr(name, def string) string {

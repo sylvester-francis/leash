@@ -12,19 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package policy
+package meter
 
-import "fmt"
+import (
+	"io"
+	"strings"
+	"testing"
+)
 
-// StopLine formats the single human-readable line leash prints when a run
-// stops, for example:
-//
-//	leash: stopped run a3f9 after 18 calls, $4.10 tokens + $0.91 compute = $5.01 (cost_budget)
-//
-// Costs are shown to the cent and the trailing parenthesis names the boundary.
-func StopLine(s *State) string {
-	return fmt.Sprintf(
-		"leash: stopped run %s after %d calls, $%.2f tokens + $%.2f compute = $%.2f (%s)",
-		s.RunID, s.Calls, s.TokenCost, s.ComputeCost, s.TotalCost, s.StopReason,
-	)
+// BenchmarkStreamMeter measures tee-and-meter throughput over an SSE stream.
+// SetBytes reports it as MB/s so the streaming overhead is legible.
+func BenchmarkStreamMeter(b *testing.B) {
+	stream := strings.Repeat(openAIStream, 100)
+	b.SetBytes(int64(len(stream)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		m := NewStreamMeter(OpenAI)
+		if err := m.Tee(io.Discard, strings.NewReader(stream)); err != nil {
+			b.Fatalf("tee: %v", err)
+		}
+	}
 }

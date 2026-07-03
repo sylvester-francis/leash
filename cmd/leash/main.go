@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Command leash puts a durable spend governor in front of an AI agent. It has
 // three surfaces over one engine: `leash -- <command>` wraps an agent with zero
 // code change, `leash serve` runs a standalone gateway, and `leash ps`,
@@ -83,11 +97,11 @@ Every shared flag also reads a LEASH_-prefixed environment variable (for example
 // commonFlags are the governance flags shared by run and serve (and reused,
 // where they make sense, by ps and inspect).
 type commonFlags struct {
-	maxCost     float64
-	maxCalls    int64
-	deadline    time.Duration
-	rate        string
-	stall       int
+	maxCost               float64
+	maxCalls              int64
+	deadline              time.Duration
+	rate                  string
+	stall                 int
 	prices                string
 	computeRate           float64
 	upstream              string

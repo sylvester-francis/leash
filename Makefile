@@ -5,7 +5,7 @@ GO ?= go
 BINARY := leash
 PKG := ./...
 
-.PHONY: all build vet test race cover mutate fuzz ascii-check tidy fmt clean
+.PHONY: all build vet test race cover mutate fuzz bench ascii-check tidy fmt clean
 
 all: build vet test ascii-check
 
@@ -57,6 +57,12 @@ fuzz:
 		echo "== $$fz =="; \
 		$(GO) test ./internal/meter/ -run '^$$' -fuzz "^$$fz$$" -fuzztime $(FUZZTIME) || exit 1; \
 	done
+
+# Benchmarks: end-to-end governed-call overhead at journal sizes 0/100/1k/10k,
+# plus fold and stream-meter throughput. Numbers are machine-dependent; always
+# state the machine when reporting them, and report only measured numbers.
+bench:
+	$(GO) test -run '^$$' -bench . -benchmem ./internal/policy/ ./internal/meter/ ./internal/proxy/
 
 # Fail on any non-ASCII byte in .go and .md files. Tabs and newlines are
 # allowed; everything outside printable ASCII plus tab is rejected.

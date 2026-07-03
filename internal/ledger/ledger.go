@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package ledger is leash's durable per-run account. It stores every governed
 // call, kill, and stop as an append-only journal on a rerun.Store (SQLite by
 // default), and rebuilds a run's totals by folding that journal. The journal is
@@ -78,8 +92,8 @@ func isPostgresDSN(dsn string) bool {
 }
 
 // openPostgres opens the PostgreSQL-backed ledger, recovering the backend's
-// open-failure panic into an error. Its store-wide governance lease is a real
-// cross-process advisory lock, which is what makes active/passive HA possible.
+// open-failure panic into an error. Its governance lease is a real cross-process
+// advisory lock, which is what makes active/passive HA possible.
 func openPostgres(dsn string) (l *Ledger, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -154,19 +168,49 @@ func (l *Ledger) EnsureRun(ctx context.Context, runID string, at time.Time) erro
 // AppendCall records one governed call at the given call index. The payload is
 // the accounting-only CallRecord; no bodies are stored.
 func (l *Ledger) AppendCall(ctx context.Context, runID string, callIndex int64, rec policy.CallRecord) error {
-	payload, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("marshal call record: %w", err)
-	}
-	tag := fmt.Sprintf("%s%d", tagCallPrefix, callIndex)
-	return l.appendNext(ctx, runID, tag, payload, rec.At)
+	_, err := l.AppendCallAt(ctx, runID, callIndex, rec, -1)
+	return err
 }
 
-// AppendKill records a durable kill. A subsequent load folds it into the state
-// so the next governed call trips the kill switch. It works from a second
-// process against the same database.
+// AppendCallAt records a call, trying journal position hintSeq first (the warm
+// path's O(1) append) and falling back to re-reading the journal to sequence
+// when hintSeq is negative or already taken. It returns the seq actually used.
+func (l *Ledger) AppendCallAt(ctx context.Context, runID string, callIndex int64, rec policy.CallRecord, hintSeq int) (int, error) {
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		return 0, fmt.Errorf("marshal call record: %w", err)
+	}
+	tag := fmt.Sprintf("%s%d", tagCallPrefix, callIndex)
+	return l.appendAt(ctx, runID, tag, payload, rec.At, hintSeq)
+}
+
+// AppendKill records a durable kill and, best-effort, sets the fast cancel flag.
+// The journal entry is authoritative (folded on any reload); the flag lets a
+// warm governor observe the kill without a full reload. A flag write failure is
+// ignored because the journal entry already guarantees enforcement.
 func (l *Ledger) AppendKill(ctx context.Context, runID string, at time.Time) error {
-	return l.appendNext(ctx, runID, tagKill, nil, at)
+	if err := l.appendNext(ctx, runID, tagKill, nil, at); err != nil {
+		return err
+	}
+	if c, ok := l.store.(rerun.Canceller); ok {
+		_ = c.RequestCancel(ctx, runID)
+	}
+	return nil
+}
+
+// CancelRequested reports whether a durable cancel is pending. supported is
+// false when the store has no Canceller, signalling the warm path to fall back
+// to a full journal reload.
+func (l *Ledger) CancelRequested(ctx context.Context, runID string) (requested, supported bool, err error) {
+	c, ok := l.store.(rerun.Canceller)
+	if !ok {
+		return false, false, nil
+	}
+	requested, err = c.CancelRequested(ctx, runID)
+	if err != nil {
+		return false, true, fmt.Errorf("cancel requested for run %s: %w", runID, err)
+	}
+	return requested, true, nil
 }
 
 // stopPayload is the accounting snapshot recorded when a run stops.
@@ -207,13 +251,12 @@ func (l *Ledger) Finish(ctx context.Context, runID string, ok bool) error {
 	return nil
 }
 
-// pingProbeRun is a sentinel run id whose (always empty) journal a readiness
-// probe loads to confirm the ledger is reachable without listing real runs.
+// pingProbeRun is a sentinel run id whose empty journal the readiness probe
+// loads to touch the store without listing real runs.
 const pingProbeRun = "__leash_readyz_probe__"
 
-// Ping performs a cheap durable read to confirm the ledger is reachable. It
-// backs the admin /readyz check: loading a sentinel run's (empty) journal
-// touches the store without depending on how many real runs exist.
+// Ping does a cheap durable read to confirm the ledger is reachable, backing the
+// admin /readyz check.
 func (l *Ledger) Ping(ctx context.Context) error {
 	if _, err := l.store.LoadLogs(ctx, pingProbeRun); err != nil {
 		return fmt.Errorf("ledger ping: %w", err)
@@ -302,17 +345,26 @@ func (l *Ledger) RawLogs(ctx context.Context, runID string) ([]rerun.Log, error)
 // prices. Folding is deterministic, so loading the same journal twice yields
 // identical totals: a call is counted exactly when its log exists, never twice.
 func (l *Ledger) Load(ctx context.Context, runID string, g *policy.Governor) (*policy.State, error) {
+	s, _, err := l.LoadAt(ctx, runID, g)
+	return s, err
+}
+
+// LoadAt is Load plus the last journal seq (or -1 when empty), so the warm path
+// can seed its append hint and skip the re-read to sequence.
+func (l *Ledger) LoadAt(ctx context.Context, runID string, g *policy.Governor) (*policy.State, int, error) {
 	logs, err := l.store.LoadLogs(ctx, runID)
 	if err != nil {
-		return nil, fmt.Errorf("load journal for run %s: %w", runID, err)
+		return nil, -1, fmt.Errorf("load journal for run %s: %w", runID, err)
 	}
 	s := &policy.State{RunID: runID}
+	lastSeq := -1
 	for _, lg := range logs {
+		lastSeq = lg.Seq
 		switch {
 		case strings.HasPrefix(lg.Tag, tagCallPrefix):
 			var rec policy.CallRecord
 			if err := json.Unmarshal(lg.Payload, &rec); err != nil {
-				return nil, fmt.Errorf("decode call log %s seq %d: %w", runID, lg.Seq, err)
+				return nil, -1, fmt.Errorf("decode call log %s seq %d: %w", runID, lg.Seq, err)
 			}
 			g.Fold(s, rec)
 		case lg.Tag == tagKill:
@@ -320,7 +372,7 @@ func (l *Ledger) Load(ctx context.Context, runID string, g *policy.Governor) (*p
 		case lg.Tag == tagStop:
 			var sp stopPayload
 			if err := json.Unmarshal(lg.Payload, &sp); err != nil {
-				return nil, fmt.Errorf("decode stop log %s seq %d: %w", runID, lg.Seq, err)
+				return nil, -1, fmt.Errorf("decode stop log %s seq %d: %w", runID, lg.Seq, err)
 			}
 			// Freeze the time-derived costs at their stop-time snapshot; token
 			// cost from folding the calls is already authoritative.
@@ -329,19 +381,36 @@ func (l *Ledger) Load(ctx context.Context, runID string, g *policy.Governor) (*p
 			s.TotalCost = s.TokenCost + sp.ComputeCost
 		}
 	}
-	return s, nil
+	return s, lastSeq, nil
 }
 
-// appendNext writes one journal entry at the next free sequence. The sequence
-// is max(seq)+1 read from the journal; a uniqueness conflict means another
-// writer took that position, so it re-reads and retries a bounded number of
-// times. Any other error is returned immediately.
+// appendNext writes one journal entry at the next free sequence, re-reading the
+// journal to find it.
 func (l *Ledger) appendNext(ctx context.Context, runID, tag string, payload []byte, at time.Time) error {
+	_, err := l.appendAt(ctx, runID, tag, payload, at, -1)
+	return err
+}
+
+// appendAt writes one journal entry, returning the seq used. A non-negative
+// hintSeq is tried first (an O(1) append); on a uniqueness conflict, or when
+// hintSeq is negative, it re-reads the journal for the next free position and
+// retries a bounded number of times. Any non-conflict error is returned at once.
+func (l *Ledger) appendAt(ctx context.Context, runID, tag string, payload []byte, at time.Time, hintSeq int) (int, error) {
+	if hintSeq >= 0 {
+		err := l.store.Append(ctx, runID, rerun.Log{Seq: hintSeq, Tag: tag, Payload: payload, At: at})
+		if err == nil {
+			return hintSeq, nil
+		}
+		if !isSequenceConflict(err) {
+			return 0, fmt.Errorf("append %s to run %s: %w", tag, runID, err)
+		}
+		// The hint was taken by a concurrent writer; fall back to a re-read.
+	}
 	var lastErr error
 	for range appendRetries {
 		logs, err := l.store.LoadLogs(ctx, runID)
 		if err != nil {
-			return fmt.Errorf("load journal to sequence append for run %s: %w", runID, err)
+			return 0, fmt.Errorf("load journal to sequence append for run %s: %w", runID, err)
 		}
 		seq := 0
 		if n := len(logs); n > 0 {
@@ -349,15 +418,15 @@ func (l *Ledger) appendNext(ctx context.Context, runID, tag string, payload []by
 		}
 		err = l.store.Append(ctx, runID, rerun.Log{Seq: seq, Tag: tag, Payload: payload, At: at})
 		if err == nil {
-			return nil
+			return seq, nil
 		}
 		if isSequenceConflict(err) {
 			lastErr = err
 			continue
 		}
-		return fmt.Errorf("append %s to run %s: %w", tag, runID, err)
+		return 0, fmt.Errorf("append %s to run %s: %w", tag, runID, err)
 	}
-	return fmt.Errorf("append %s to run %s: exhausted %d attempts racing for a journal position: %w",
+	return 0, fmt.Errorf("append %s to run %s: exhausted %d attempts racing for a journal position: %w",
 		tag, runID, appendRetries, lastErr)
 }
 
