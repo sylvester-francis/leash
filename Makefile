@@ -1,0 +1,67 @@
+# leash - durable agent spend governor.
+# Standard library plus github.com/sylvester-francis/rerun; nothing else.
+
+GO ?= go
+BINARY := leash
+PKG := ./...
+
+.PHONY: all build vet test race cover mutate ascii-check tidy fmt clean
+
+all: build vet test ascii-check
+
+build:
+	$(GO) build $(PKG)
+	$(GO) build -o $(BINARY) ./cmd/leash
+
+vet:
+	$(GO) vet $(PKG)
+
+test:
+	$(GO) test $(PKG)
+
+race:
+	$(GO) test -race $(PKG)
+
+cover:
+	$(GO) test -coverprofile=coverage.out $(PKG)
+	$(GO) tool cover -func=coverage.out | tail -n 1
+
+# Mutation testing with gremlins (https://github.com/go-gremlins/gremlins).
+# Install: go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+# The timeout coefficient gives each mutant enough headroom to recompile; with a
+# fast test suite the default derives a sub-second timeout and every mutant times
+# out. The README reports a kill rate only when one was actually measured; never
+# claim an unmeasured rate.
+#
+# mutate      - the deterministic core (policy + meter): fast and repeatable.
+# mutate-all  - the whole module, including the network and subprocess tests.
+mutate:
+	@if command -v gremlins >/dev/null 2>&1; then \
+		gremlins unleash --timeout-coefficient 30 ./internal/policy/ ./internal/meter/ ; \
+	else \
+		echo "gremlins not installed."; \
+		echo "install: go install github.com/go-gremlins/gremlins/cmd/gremlins@latest"; \
+		echo "run:     gremlins unleash --timeout-coefficient 30 ./internal/policy/ ./internal/meter/"; \
+		exit 1; \
+	fi
+
+mutate-all:
+	gremlins unleash --timeout-coefficient 30 ./...
+
+# Fail on any non-ASCII byte in .go and .md files. Tabs and newlines are
+# allowed; everything outside printable ASCII plus tab is rejected.
+ascii-check:
+	@tab=$$(printf '\t'); \
+	if LC_ALL=C grep -rn "[^$$tab -~]" --include='*.go' --include='*.md' . ; then \
+		echo "ascii-check: non-ASCII bytes found (see above)"; exit 1; \
+	else echo "ascii-check: ok"; fi
+
+tidy:
+	$(GO) mod tidy
+
+fmt:
+	$(GO) fmt $(PKG)
+
+clean:
+	rm -f $(BINARY) coverage.out
+	$(GO) clean
