@@ -1,0 +1,72 @@
+// Package meter parses real token usage off provider response wires, in both
+// non-streaming JSON and streaming SSE forms, for OpenAI-compatible and
+// Anthropic APIs. It never estimates tokens: it counts only what the wire
+// reports, and it tees streaming responses to the client byte for byte while
+// reading usage on the side.
+package meter
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/sylvester-francis/leash/internal/policy"
+)
+
+// Provider identifies which wire format a request or response uses.
+type Provider int
+
+const (
+	// Unknown is a request leash does not recognize; its token meter is blind.
+	Unknown Provider = iota
+	// OpenAI is the OpenAI-compatible chat/completions/responses format.
+	OpenAI
+	// Anthropic is the Anthropic messages format.
+	Anthropic
+)
+
+// String returns the provider name for logs.
+func (p Provider) String() string {
+	switch p {
+	case OpenAI:
+		return "openai"
+	case Anthropic:
+		return "anthropic"
+	default:
+		return "unknown"
+	}
+}
+
+// Result is the outcome of metering one call: the token usage, a normalized
+// content fingerprint for stall detection, and whether any usage was found on
+// the wire (false means the token meter was blind for this call).
+type Result struct {
+	// Usage is the token accounting read from the wire.
+	Usage policy.Usage
+	// Fingerprint is the hash of the assistant text, or empty when blank.
+	Fingerprint string
+	// HasUsage reports whether usage numbers were present on the wire.
+	HasUsage bool
+}
+
+// DetectProvider infers the provider from the request path and headers. An
+// Anthropic-Version header wins outright; otherwise the path decides. Unknown
+// paths return Unknown so the caller can forward them without metering.
+func DetectProvider(path string, header http.Header) Provider {
+	if header != nil && header.Get("Anthropic-Version") != "" {
+		return Anthropic
+	}
+	switch {
+	case strings.Contains(path, "/messages"):
+		return Anthropic
+	case strings.Contains(path, "/completions"), strings.Contains(path, "/responses"):
+		return OpenAI
+	default:
+		return Unknown
+	}
+}
+
+// IsSSE reports whether a response Content-Type is a server-sent event stream,
+// which selects the streaming meter over the JSON meter.
+func IsSSE(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
+}

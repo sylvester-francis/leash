@@ -1,0 +1,20 @@
+# Compiled binary and build artifacts.
+/leash
+/cmd/leash/leash
+*.test
+*.out
+coverage.out
+
+# Local ledger databases (default lives in $HOME/.leash, but guard against
+# accidental in-repo databases created during testing or demos).
+*.db
+*.db-wal
+*.db-shm
+.leash/
+
+# OS cruft.
+.DS_Store
+
+# Build guides are not part of the application and must not be committed.
+leash-application-build-prompt.md
+leash-teaching-module-build-prompt.md

@@ -1,0 +1,237 @@
+# Metering the wire
+
+leash never estimates tokens. It counts only what the provider puts on the
+wire, and when the wire is silent it marks the call blind rather than guess.
+This guide is how that reading works: the two wire formats leash understands
+(OpenAI-compatible and Anthropic), the two shapes each can take (one JSON body,
+or a server-sent-event stream), and the one request rewrite that makes an
+OpenAI stream report its usage at all.
+
+The code lives in `internal/meter`: `provider.go` (detection and the `Result`
+type), `parse.go` (non-streaming JSON), `stream.go` (the SSE tee-and-meter), and
+`inject.go` (the request rewrite).
+
+## What one call produces: Result
+
+Metering a call yields a `Result` with three parts:
+
+- `Usage` - the token accounting read from the wire (model, input, output,
+  reasoning).
+- `Fingerprint` - a hash of the assistant's text, used by the stall boundary to
+  notice identical responses in a row. Empty when the text is blank.
+- `HasUsage` - true when usage numbers were actually present on the wire.
+  **`HasUsage == false` means the token meter was blind for that call**: leash
+  records zero tokens for it rather than inventing a number.
+
+Usage and fingerprint are independent. A call can be blind on tokens
+(`HasUsage == false`) and still carry a fingerprint, because the assistant text
+and the usage block arrive in different places on the wire.
+
+## Provider detection
+
+`DetectProvider` picks the wire format from the request path and headers:
+
+- An `Anthropic-Version` header wins outright -> Anthropic.
+- Otherwise the path decides: a path containing `/messages` -> Anthropic; a path
+  containing `/completions` or `/responses` -> OpenAI. (Both `/chat/completions`
+  and `/completions` contain `/completions`.)
+- Anything else -> Unknown. leash forwards Unknown requests but does not meter
+  them.
+
+Detection selects the format. A separate signal, the *response* `Content-Type`,
+selects the shape: `IsSSE` returns true for a Content-Type that begins with
+`text/event-stream` (trimmed, case-insensitive), which routes the response
+through the streaming meter instead of the JSON meter.
+
+## OpenAI wire format
+
+### Non-streaming JSON
+
+leash reads `usage` and the assistant text from the complete body:
+
+```json
+{
+  "model": "gpt-4o",
+  "choices": [{"message": {"role": "assistant", "content": "Hello there"}}],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "completion_tokens_details": {"reasoning_tokens": 3}
+  }
+}
+```
+
+- `usage.prompt_tokens` -> input tokens
+- `usage.completion_tokens` -> output tokens
+- `usage.completion_tokens_details.reasoning_tokens` -> reasoning tokens
+- the text of every `choices[].message.content` is concatenated into the stall
+  fingerprint
+
+If the `usage` object is absent, the call is blind: `HasUsage` is false, tokens
+are zero, and the fingerprint is still taken from the content.
+
+### Streaming SSE
+
+A stream carries the text as a run of `delta` chunks. The usage block appears
+only in a **final chunk with an empty `choices` array**, and that chunk is
+emitted only when the request asked for it (see the injection section below).
+
+```text
+data: {"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}
+
+data: {"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" world"}}]}
+
+data: {"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"model":"gpt-4o","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"completion_tokens_details":{"reasoning_tokens":1}}}
+
+data: [DONE]
+```
+
+leash concatenates each `choices[].delta.content` into the fingerprint
+("Hello" + " world") and reads the usage fields from the final chunk. The
+`[DONE]` sentinel and any non-`data:` line are ignored. If no usage chunk ever
+arrives, the stream is blind on tokens but the fingerprint still holds
+"Hello world".
+
+## Anthropic wire format
+
+### Non-streaming JSON
+
+```json
+{
+  "model": "claude-3-5-sonnet",
+  "content": [{"type": "text", "text": "Hi"}, {"type": "text", "text": " there"}],
+  "usage": {"input_tokens": 12, "output_tokens": 7}
+}
+```
+
+- `usage.input_tokens` -> input tokens
+- `usage.output_tokens` -> output tokens
+- the `text` of every `content[]` block whose `type` is `text` is concatenated
+  into the fingerprint
+
+Anthropic reports no reasoning field, so reasoning tokens are zero for this
+format. An absent `usage` object makes the call blind, with the fingerprint
+still taken from the text blocks.
+
+### Streaming SSE
+
+Anthropic spreads its usage across events. Input tokens arrive up front in
+`message_start`; output tokens arrive as a running total in `message_delta`.
+
+```text
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","model":"claude-3-5-sonnet","usage":{"input_tokens":12,"output_tokens":1}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}
+
+event: message_stop
+data: {"type":"message_stop"}
+```
+
+- `message_start` -> model and `input_tokens` (plus an initial `output_tokens`)
+- `content_block_delta` with a `text_delta` -> its `text` is appended to the
+  fingerprint ("Hi" + " there")
+- `message_delta` -> `output_tokens`, which Anthropic reports **cumulatively**.
+  leash overwrites its output count on each `message_delta`, so the latest one
+  wins (here, 5).
+
+leash reads only `data:` lines; the `event:` lines are informational and
+ignored.
+
+## The tee: byte for byte, never buffered
+
+leash never holds a stream to meter it. `StreamMeter.Tee` wraps the upstream
+body in an `io.TeeReader`, so every byte is written to the client at the instant
+it is read from the upstream - the client sees tokens exactly as fast, and in
+exactly the bytes, the provider emits them. leash parses usage from that copy on
+the side.
+
+Two consequences follow, both deliberate:
+
+- The client's stream is never reordered, rebuffered, or altered. The tests
+  assert the teed bytes equal the upstream bytes exactly, including the `event:`
+  framing and the blank lines between events.
+- A malformed event cannot break the client. A parse error on any single SSE
+  line is swallowed, so a chunk leash cannot read costs it that chunk's usage
+  but never truncates what the client receives.
+
+The `Result` is read only when the stream ends, once the final usage chunk
+(OpenAI) or the last `message_delta` (Anthropic) has been seen.
+
+## Asking OpenAI streams for usage: InjectIncludeUsage
+
+An OpenAI stream reports usage only when the request set
+`stream_options.include_usage`. Most agent code does not set it, so without help
+every streaming OpenAI call would be blind. For OpenAI requests, leash rewrites
+the request body to add it.
+
+`InjectIncludeUsage` is conservative:
+
+- It acts only on a **streaming** request - one whose body has `"stream": true`.
+  A missing `stream` key or `"stream": false` is returned untouched.
+- It **preserves** any `stream_options` already present, adding `include_usage`
+  alongside them rather than replacing the object.
+- It does nothing when `include_usage` is already true.
+- On a body it cannot parse as JSON it returns the original bytes with an error;
+  leash then forwards the request unchanged and treats the call as blind rather
+  than corrupt a request it does not understand.
+
+A streaming request goes in:
+
+```json
+{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}
+```
+
+and comes out with the one field added:
+
+```json
+{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}],"stream_options":{"include_usage":true}}
+```
+
+leash calls this only for OpenAI requests; Anthropic streams already carry usage
+in their own events and are never rewritten, and non-streaming requests are left
+alone. Standard OpenAI SDKs tolerate the extra final usage chunk (its `choices`
+array is empty, so it adds no text); a hand-rolled client that does not is the
+reason the rewrite has an off switch.
+
+## The off switch and the blind path
+
+`--no-inject` turns the rewrite off:
+
+```sh
+leash --no-inject -- python my_agent.py
+```
+
+With it set, leash simply does not call `InjectIncludeUsage`, so a streaming
+OpenAI request that did not already ask for usage produces no usage chunk.
+
+That call's token meter is then blind: leash records **zero tokens** for it and
+warns once per run that the meter is blind, rather than repeat the warning on
+every call. It does not estimate. The cost budget and the rate limit can act
+only on the tokens leash actually saw, so a blind call is invisible to them; but
+the boundaries that need no token counts still hold the run - calls, deadline,
+stall, and the kill switch. Reach for `--no-inject` only when a client genuinely
+cannot handle the trailing chunk, and expect to lean on those other boundaries.
+
+## Unknown providers, and the fingerprint on a blind call
+
+A request whose path and headers match neither format is `Unknown`. leash
+forwards it to the upstream untouched but does not meter it: the JSON path
+returns an empty `Result` - no usage, and no fingerprint, because leash does not
+know where the assistant text lives in an unknown format.
+
+That is distinct from a call that is blind only on **tokens**. When the provider
+is known but its response simply omits usage - an OpenAI stream with no usage
+chunk, an Anthropic body with no `usage` object - leash still parses the visible
+assistant text into a fingerprint. The token meter is blind, but the stall
+boundary keeps working, because it depends on the content leash can see, not on
+the token counts it cannot.
