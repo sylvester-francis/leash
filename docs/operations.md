@@ -49,11 +49,15 @@ window you need and watch free space (see below), because leash does not prune
 
 Scrape the `--admin` `/metrics` endpoint. The series worth alerting on:
 
-- `up` / `GET /readyz` returning 503. A 503 means a ledger read failed within the
+- `up` / `GET /readyz` returning 503. A 503 means a ledger write probe failed within the
   1s budget: the governor cannot account for calls and is failing closed. Page on
   it.
 - `rate(leash_upstream_errors_total[5m])`. A rising rate means calls are failing
   to reach or read the upstream.
+- `rate(leash_ledger_errors_total[5m])`. Any nonzero rate means durable writes
+  are failing (a full or read-only disk, a locked or unreachable database). leash
+  fails closed - it refuses calls it cannot record - so this pairs with `/readyz`
+  returning 503. Page on it.
 - `increase(leash_stops_total{reason="..."}[...])`. Watch which boundaries fire.
   A spike in `cost_budget` or `max_calls` stops may mean a runaway agent; a spike
   in `stall` means agents repeating themselves.

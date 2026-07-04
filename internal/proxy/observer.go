@@ -32,6 +32,8 @@ type Observer interface {
 	RunStopped(state *policy.State)
 	// UpstreamError reports a failed upstream request or response read.
 	UpstreamError()
+	// LedgerError reports a failed durable write (a call or stop record).
+	LedgerError()
 }
 
 // NopObserver ignores every event. New installs it when Config.Observer is nil.
@@ -48,6 +50,9 @@ func (NopObserver) RunStopped(*policy.State) {}
 
 // UpstreamError ignores the event.
 func (NopObserver) UpstreamError() {}
+
+// LedgerError ignores the event.
+func (NopObserver) LedgerError() {}
 
 // MultiObserver fans each event out to several Observers in order.
 type MultiObserver []Observer
@@ -80,6 +85,13 @@ func (m MultiObserver) UpstreamError() {
 	}
 }
 
+// LedgerError forwards to each observer.
+func (m MultiObserver) LedgerError() {
+	for _, o := range m {
+		o.LedgerError()
+	}
+}
+
 // stopLineObserver adapts a stop-line callback to the Observer seam.
 type stopLineObserver struct {
 	onStop func(*policy.State)
@@ -96,6 +108,9 @@ func (o stopLineObserver) RunStopped(s *policy.State) { o.onStop(s) }
 
 // UpstreamError ignores the event.
 func (stopLineObserver) UpstreamError() {}
+
+// LedgerError ignores the event.
+func (stopLineObserver) LedgerError() {}
 
 // StopLineObserver returns an Observer that calls onStop once when a run stops.
 func StopLineObserver(onStop func(*policy.State)) Observer {

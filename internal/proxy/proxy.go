@@ -95,7 +95,7 @@ var (
 // safe defaults.
 type Config struct {
 	// Ledger is the durable account. Required.
-	Ledger *ledger.Ledger
+	Ledger Ledger
 	// Governor holds the boundaries and meters. Required.
 	Governor *policy.Governor
 	// DefaultRun is the run id used when a request carries no X-Loop-Id. Empty
@@ -175,6 +175,9 @@ type runState struct {
 
 	lastActiveNanos atomic.Int64
 	stopped         atomic.Bool
+	// appendFailed is set when a durable write for this run failed; the next call
+	// is refused (fail closed) until a write probe succeeds.
+	appendFailed atomic.Bool
 }
 
 // New builds a Proxy and claims the ledger's governance lease. It returns an
@@ -304,12 +307,28 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		rs.stopped.Store(true)
 		if err := p.cfg.Ledger.AppendStop(ctx, runID, state, now); err != nil {
 			p.cfg.Logger.Error("record stop failed", "run", runID, "err", err)
+			p.cfg.Observer.LedgerError()
 		}
 		p.cfg.Observer.RunStopped(state)
 		p.cfg.Observer.CallRefused(provider, reason)
 		p.cfg.Logger.Info("run stopped", "run", runID, "reason", reason, "calls", state.Calls)
 		writeBoundary(w, state)
 		return
+	}
+
+	// Fail closed on a run whose durable writes are failing: a prior call could
+	// not be recorded, so refuse to forward (and bill) another unmetered one
+	// until a write probe confirms the ledger recovered.
+	if rs.appendFailed.Load() {
+		if err := p.cfg.Ledger.Ping(ctx); err != nil {
+			p.writeGatewayError(w, http.StatusServiceUnavailable,
+				"ledger write is failing; refusing to forward an unmetered call")
+			p.cfg.Observer.CallRefused(provider, "ledger_unavailable")
+			p.cfg.Observer.LedgerError()
+			p.cfg.Logger.Error("refusing to forward: ledger writes failing", "run", runID, "err", err)
+			return
+		}
+		rs.appendFailed.Store(false)
 	}
 
 	// Fail closed on an endpoint leash cannot meter under a cost budget: an
@@ -454,12 +473,17 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	recCtx := context.WithoutCancel(ctx)
 	rec := policy.CallRecord{Usage: result.Usage, Fingerprint: result.Fingerprint, At: at}
 	if usedSeq, appendErr := p.cfg.Ledger.AppendCallAt(recCtx, runID, state.Calls, rec, rs.lastSeq+1); appendErr != nil {
+		// The call could not be recorded. Flag the run so the next call fails
+		// closed rather than forwarding more unmetered spend.
 		p.cfg.Logger.Error("record call failed", "run", runID, "err", appendErr)
+		rs.appendFailed.Store(true)
+		p.cfg.Observer.LedgerError()
 	} else {
 		// Fold into the warm cache and advance the seq hint so the next call needs
 		// neither a reload nor a re-read. state is the cached pointer, so the cache
 		// stays equal to a cold fold of the journal.
 		rs.lastSeq = usedSeq
+		rs.appendFailed.Store(false)
 		p.cfg.Governor.Fold(state, rec)
 	}
 

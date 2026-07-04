@@ -45,6 +45,7 @@ type Metrics struct {
 	tokenCostUSD   float64
 	blindCalls     int64
 	upstreamErrors int64
+	ledgerErrors   int64
 }
 
 // NewMetrics returns an empty registry stamped with version. The price table
@@ -96,6 +97,13 @@ func (m *Metrics) UpstreamError() {
 	m.upstreamErrors++
 }
 
+// LedgerError records one durable-write failure.
+func (m *Metrics) LedgerError() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ledgerErrors++
+}
+
 // WriteTo renders the metrics in Prometheus text format. activeRuns is passed in
 // because that live count is owned by the Proxy, not accumulated here.
 func (m *Metrics) WriteTo(w io.Writer, activeRuns int) {
@@ -135,6 +143,10 @@ func (m *Metrics) WriteTo(w io.Writer, activeRuns int) {
 	b.WriteString("# HELP leash_upstream_errors_total Upstream request or read failures.\n")
 	b.WriteString("# TYPE leash_upstream_errors_total counter\n")
 	fmt.Fprintf(&b, "leash_upstream_errors_total %d\n", m.upstreamErrors)
+
+	b.WriteString("# HELP leash_ledger_errors_total Durable-write failures (a call or stop record).\n")
+	b.WriteString("# TYPE leash_ledger_errors_total counter\n")
+	fmt.Fprintf(&b, "leash_ledger_errors_total %d\n", m.ledgerErrors)
 
 	b.WriteString("# HELP leash_build_info Build version, always 1.\n")
 	b.WriteString("# TYPE leash_build_info gauge\n")

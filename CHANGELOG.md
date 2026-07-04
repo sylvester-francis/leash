@@ -26,6 +26,12 @@ metering-integrity gaps. It is the first release to change default behavior.
 - **Client-disconnect metering bypass.** The call record is written with a
   detached context, so a client that drops the connection mid-stream can no
   longer prevent the call from being metered.
+- **Ledger writes now fail closed.** A run whose call record fails to persist is
+  refused (503) on its next call until a write probe confirms the ledger
+  recovered, instead of forwarding more unmetered spend. `EnsureRun` only treats
+  a duplicate-key error as a resume, so a partial database failure surfaces
+  rather than being mistaken for one. `/readyz` now exercises a write, so a
+  read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
 - Optional proxy authentication: `serve --auth-token` (prefer `LEASH_AUTH_TOKEN`)
