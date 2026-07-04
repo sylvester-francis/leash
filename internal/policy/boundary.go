@@ -174,6 +174,18 @@ func NewGovernor(l Limits, prices PriceTable, computeRate float64) *Governor {
 	return g
 }
 
+// MetersCost reports whether a cost budget is active, i.e. whether the governor
+// relies on token cost to stop the run. The proxy uses this to decide whether an
+// unmeterable call is a fail-closed concern.
+func (g *Governor) MetersCost() bool {
+	for _, b := range g.Boundaries {
+		if _, ok := b.(CostBudget); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // Evaluate refreshes the state's cost and time fields, then checks every active
 // boundary in order. It returns the reason of the first tripped boundary and
 // true, or the empty string and false when the run may proceed. Evaluate does

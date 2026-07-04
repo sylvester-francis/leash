@@ -235,3 +235,27 @@ chunk, an Anthropic body with no `usage` object - leash still parses the visible
 assistant text into a fingerprint. The token meter is blind, but the stall
 boundary keeps working, because it depends on the content leash can see, not on
 the token counts it cannot.
+
+leash reads a usage block only when it carries the fields it expects. A body
+whose `usage` object is present but shaped for a different provider (for example
+an OpenAI response mis-tagged as Anthropic by a stray `Anthropic-Version` header)
+is treated as blind, not as a real zero-token call - so a mis-tag cannot silently
+zero the meter. Both OpenAI wire shapes are understood: chat/completions
+(`prompt_tokens`/`completion_tokens`) and the Responses API
+(`input_tokens`/`output_tokens`, text in `output[]`), streaming and not.
+
+## Failing closed on an unmeterable call
+
+For a spend governor, the dangerous failure is metering a real, billed call at
+$0. When a cost budget is active, `--on-blind` decides what happens to a call
+leash cannot price:
+
+- `refuse` (default) fails closed. An `Unknown`-provider call is rejected with a
+  402 before it is forwarded. A known-provider call that comes back with no
+  readable usage is delivered once (the upstream already billed it) and then the
+  run is stopped with reason `meter_blind`, so no further spend goes uncounted.
+- `warn` keeps the older behavior: forward the call and warn once per run.
+- `allow` forwards silently.
+
+With no cost budget set, a blind call is harmless to the budget and is allowed;
+the call, deadline, stall, and kill boundaries still hold the run.

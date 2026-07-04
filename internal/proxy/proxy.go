@@ -61,6 +61,26 @@ const defaultRunID = "default"
 // It is leash-internal and never forwarded upstream.
 const authHeader = "X-Leash-Token"
 
+// blindStopReason is the stop reason recorded when a call cannot be metered
+// under a cost budget and Config.OnBlind is BlindRefuse.
+const blindStopReason = "meter_blind"
+
+// BlindPolicy decides what leash does when it cannot meter a call's cost (an
+// unrecognized provider, or a response whose usage it cannot read) while a cost
+// budget is active. The zero value, BlindRefuse, fails closed.
+type BlindPolicy int
+
+const (
+	// BlindRefuse fails closed: an unmeterable endpoint is refused before it is
+	// forwarded, and a run whose forwarded call comes back unmeterable is stopped
+	// so no further spend goes uncounted.
+	BlindRefuse BlindPolicy = iota
+	// BlindWarn forwards the call and warns once per run (the pre-v0.2 behavior).
+	BlindWarn
+	// BlindAllow forwards the call silently.
+	BlindAllow
+)
+
 // defaultMaxBodyBytes caps a request body at 10 MiB when Config.MaxBodyBytes is
 // unset. It guards the request read only; responses are never capped.
 const defaultMaxBodyBytes = 10 * 1024 * 1024
@@ -109,6 +129,9 @@ type Config struct {
 	// MaxRuns caps the number of runs the proxy will track in memory at once;
 	// zero is unlimited. A request for a new run beyond the cap is refused 503.
 	MaxRuns int
+	// OnBlind decides how leash handles a call it cannot meter while a cost
+	// budget is active. The zero value (BlindRefuse) fails closed.
+	OnBlind BlindPolicy
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Logger receives redacted structured logs; nil discards them. Header values
@@ -289,7 +312,25 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fail closed on an endpoint leash cannot meter under a cost budget: an
+	// Unknown provider is refused before it is forwarded, so unpriced spend never
+	// slips past the cost boundary. (A known provider that returns unreadable
+	// usage is caught after the fact in forward, which then stops the run.)
+	if provider == meter.Unknown && p.blindRefuses() {
+		p.writeGatewayError(w, http.StatusPaymentRequired,
+			"leash cannot meter this endpoint under a cost budget (--on-blind=refuse)")
+		p.cfg.Observer.CallRefused(provider, blindStopReason)
+		p.cfg.Logger.Warn("refused unmeterable endpoint under a cost budget", "run", runID, "path", r.URL.Path)
+		return
+	}
+
 	p.forward(ctx, w, r, runID, provider, rs)
+}
+
+// blindRefuses reports whether an unmeterable call should fail closed: the
+// policy is BlindRefuse and a cost budget is actually active.
+func (p *Proxy) blindRefuses() bool {
+	return p.cfg.OnBlind == BlindRefuse && p.cfg.Governor.MetersCost()
 }
 
 // stateFor returns the run's folded state. On the cold path (first touch or
@@ -406,10 +447,13 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 
 	// Record the call after the response is delivered. A crash before this point
-	// undercounts by one call (safe) but can never double count.
+	// undercounts by one call (safe) but can never double count. Record with a
+	// detached context: the upstream already billed this call, so a client that
+	// disconnects mid-stream must not cancel the ledger write.
 	at := p.cfg.Now()
+	recCtx := context.WithoutCancel(ctx)
 	rec := policy.CallRecord{Usage: result.Usage, Fingerprint: result.Fingerprint, At: at}
-	if usedSeq, appendErr := p.cfg.Ledger.AppendCallAt(ctx, runID, state.Calls, rec, rs.lastSeq+1); appendErr != nil {
+	if usedSeq, appendErr := p.cfg.Ledger.AppendCallAt(recCtx, runID, state.Calls, rec, rs.lastSeq+1); appendErr != nil {
 		p.cfg.Logger.Error("record call failed", "run", runID, "err", appendErr)
 	} else {
 		// Fold into the warm cache and advance the seq hint so the next call needs
@@ -418,8 +462,21 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		rs.lastSeq = usedSeq
 		p.cfg.Governor.Fold(state, rec)
 	}
-	blind := !result.HasUsage && provider != meter.Unknown
-	if blind {
+
+	blind := !result.HasUsage
+	switch {
+	case blind && p.blindRefuses() && state.StopReason == "":
+		// Fail closed: a forwarded call under a cost budget came back unmeterable.
+		// The response already reached the client, so stop the run to bound the
+		// damage - no further spend goes uncounted.
+		state.StopReason = blindStopReason
+		rs.stopped.Store(true)
+		if err := p.cfg.Ledger.AppendStop(recCtx, runID, state, at); err != nil {
+			p.cfg.Logger.Error("record blind stop failed", "run", runID, "err", err)
+		}
+		p.cfg.Observer.RunStopped(state)
+		p.cfg.Logger.Warn("run stopped: a forwarded call could not be metered under a cost budget", "run", runID)
+	case blind && p.cfg.OnBlind != BlindAllow:
 		p.warnBlind(runID)
 	}
 	p.cfg.Observer.CallForwarded(provider, result.Usage, blind)
