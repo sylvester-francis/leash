@@ -25,22 +25,35 @@ leash serve --listen :8088 --max-cost 5.00 --prices prices.json
 reference - plus one flag of its own:
 
 ```
---listen   address to listen on   (default :8088)
+--listen           address to listen on                         (default :8088)
+--require-run-id    refuse requests with no X-Loop-Id (400)      (default off)
+--admin             admin listener for health and metrics        (default off)
+--standby           wait for the governance lease (HA)           (default off)
+--log-level         debug, info, warn, or error                  (default info)
+--log-format        text or json                                 (default text)
 ```
 
 leash binds `--listen`, governs every request that arrives, forwards the allowed
-ones upstream, and writes operational logs to stderr. Two of those log lines
-matter: one when it comes up, and one each time a run stops. The stop line is
-emitted through the observer seam the CLI wires into the proxy - the same seam
-left open for future telemetry exporters:
+ones upstream, and writes structured logs to stderr through `log/slog`. The
+startup line carries the build version, and each run stop is emitted through the
+observer seam the CLI wires into the proxy - the same seam the metrics registry
+uses:
 
 ```console
-leash: serving on :8088 (db /home/you/.leash/leash.db)
+level=INFO msg=serving version=v0.1.0 addr=:8088 db=/home/you/.leash/leash.db
 leash: stopped run nightly-batch-7 after 18 calls, $4.10 tokens + $0.91 compute = $5.01 (cost_budget)
 ```
 
 The server shuts down cleanly on SIGINT or SIGTERM, draining in-flight requests
 within a short timeout.
+
+## Health checks and metrics
+
+`--admin ADDR` starts a second HTTP server, separate from the proxy listener so
+it never collides with proxied paths and can sit on its own segment. It serves
+`GET /healthz` (always 200), `GET /readyz` (200 when a ledger read succeeds within
+1s, else 503), and `GET /metrics` (Prometheus text, no run-id labels). See
+docs/deployment.md and docs/operations.md.
 
 ## Pointing a client at it
 
@@ -99,6 +112,12 @@ A request with no `X-Loop-Id` falls under the single run id `default`, so all
 untagged traffic shares one budget. In serve mode there is no wrapper default to
 fall back to - the id is literally `default`. Give each independent agent run
 its own `X-Loop-Id` so their budgets stay separate.
+
+On a shared gateway this is a footgun: one stopped `default` run would 429 all
+untagged traffic. `--require-run-id` closes it by refusing any request with no
+`X-Loop-Id` (a 400 `leash_gateway` error) instead of pooling it into `default`.
+A client-supplied run id is validated at the door - an invalid `X-Loop-Id` gets a
+400, which also blocks log injection via header newlines.
 
 leash consumes `X-Loop-Id` as routing and does not forward it upstream; the
 provider never sees the header.
@@ -234,7 +253,16 @@ second process see and append to the ledger while the server holds it. That is
 how the operating commands above run against a live gateway.
 
 Running two `leash serve` processes against the same ledger and governing the
-same runs is the case that needs more. Coordinating them safely - so two servers
-cannot both admit the next call for one run - needs a cross-process lease, which
-is the rerun Postgres backend rather than the local SQLite file. For a single
-gateway process, the common case, SQLite is enough.
+same runs is the case that needs a cross-process lease. Point `--db` at Postgres
+to get one:
+
+```sh
+leash serve --listen :8088 --db postgres://user:pass@host/leash --max-cost 20
+```
+
+A `postgres://` `--db` selects rerun's Postgres backend, whose governance lease
+is a real advisory lock: exactly one instance governs the ledger at a time. Start
+a second instance with `--standby` and it waits for the lease, taking over when
+the first steps down - active/passive HA. For a single gateway process, the
+common case, SQLite is enough; the rule there is one governor per SQLite ledger.
+See docs/durability.md and docs/operations.md.

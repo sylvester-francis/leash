@@ -9,11 +9,15 @@ separates leash's flags from the child command.
 ```
 leash [flags] -- <command> [args...]   wrap an agent (Tier 1, the default)
 leash serve [flags]                    standalone gateway (Tier 2)
-leash ps [flags]                       list active runs from the ledger
-leash inspect [flags] <run>            show one run's folded journal
+leash ps [flags] [--json]              list active runs from the ledger
+leash inspect [flags] [--json] <run>   show one run's folded journal
 leash kill [flags] <run>               durably stop a run on its next call
+leash version                          print the build version
 leash help                             top-level help
 ```
+
+`leash version` prints one line, `leash <version> <goversion> <os>/<arch>`, with
+the version stamped at release time.
 
 `run` is also accepted as an explicit subcommand (`leash run [flags] -- ...`),
 but it is the default: anything that is not another subcommand is treated as a
@@ -37,15 +41,27 @@ the kill switch is always active.
 | `--db` | path | `~/.leash/leash.db` | ledger database path |
 | `--run` | name | random | run name; reuse it to resume that budget |
 | `--no-inject` | bool | `false` | do not add `stream_options.include_usage` |
+| `--max-body-bytes` | int | `10485760` | cap on the request body in bytes (10 MiB); over-cap gets 413 |
+| `--upstream-header-timeout` | duration | `5m` | how long the upstream may take to send response headers; `0` disables; the body stream is never capped |
+| `--log-level` | string | `info` | `debug`, `info`, `warn`, or `error` |
+| `--log-format` | string | `text` | `text` or `json` |
+
+A run id (the `--run` flag and the `X-Loop-Id` header) must match
+`^[A-Za-z0-9][A-Za-z0-9._-]{0,117}$`. An invalid `--run` exits 1; an invalid
+header gets 400.
 
 `serve` adds:
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--listen` | address | `:8088` | address the gateway listens on |
+| `--require-run-id` | bool | `false` | refuse a request with no `X-Loop-Id` (400) instead of pooling it into `default` |
+| `--admin` | address | off | admin listener for `/healthz`, `/readyz`, `/metrics`; empty disables |
+| `--standby` | bool | `false` | wait for the governance lease instead of erroring when another instance holds it (active/passive HA) |
 
 `ps` and `inspect` accept the governance flags too, so `--db`, `--prices`, and
-`--compute-rate` let them compute and display costs. `kill` accepts only `--db`.
+`--compute-rate` let them compute and display costs, and both take `--json`.
+`kill` accepts only `--db`.
 
 The `--rate` value is `tokens/window`: an integer, a slash, and a Go duration
 (`100000/1m`, `50000/30s`, `2000000/1h`). Both parts are required.
@@ -78,7 +94,14 @@ OPENAI_API_BASE   = http://127.0.0.1:PORT/v1     (legacy alias)
 ANTHROPIC_BASE_URL= http://127.0.0.1:PORT        (SDK appends /v1/messages)
 ```
 
-leash reads no environment variables of its own; all configuration is via flags.
+## Environment variables leash reads
+
+Every shared flag also reads a `LEASH_`-prefixed variable named mechanically from
+the flag: `--max-cost` reads `LEASH_MAX_COST`, `--db` reads `LEASH_DB`, `--admin`
+reads `LEASH_ADMIN`, and so on for every flag in the tables above. Precedence is
+explicit flag, then environment, then the built-in default. A malformed value is
+reported on stderr and the default is used. No YAML or config files: flags and
+`LEASH_*` variables only. See docs/deployment.md for the full table.
 
 ## The run header (gateway mode)
 
@@ -128,6 +151,51 @@ A clean finish:
 ```
 leash: run a3f9 finished after 12 calls, $2.30 tokens + $0.00 compute = $2.30 (child_exited)
 ```
+
+## JSON output
+
+`--json` on `ps` and `inspect` emits stable machine-readable shapes; the human
+tables stay the default. `ps --json` is an array of run summaries:
+
+```json
+[
+  {"run":"nightly-7","calls":18,"input_tokens":36000,"output_tokens":12000,
+   "reasoning_tokens":0,"token_cost":4.10,"compute_cost":0.91,"total_cost":5.01,
+   "status":"stopped","reason":"cost_budget"}
+]
+```
+
+`inspect --json` is one object: the same run summary fields plus an `entries`
+array of the decoded journal:
+
+```json
+{"run":"nightly-7","calls":18,"input_tokens":36000,"output_tokens":12000,
+ "reasoning_tokens":0,"token_cost":4.10,"compute_cost":0.91,"total_cost":5.01,
+ "status":"stopped","reason":"cost_budget",
+ "entries":[
+   {"seq":0,"tag":"call-0","at":"2026-07-03T15:08:05-04:00","kind":"call",
+    "model":"gpt-4o","input_tokens":2000,"output_tokens":650,"reasoning_tokens":0},
+   {"seq":18,"tag":"stop","at":"2026-07-03T15:12:41-04:00","kind":"stop",
+    "reason":"cost_budget"}
+ ]}
+```
+
+`status` is `running`, `killed`, or `stopped`; `reason` is empty until a boundary
+stops the run.
+
+## The admin listener
+
+When `serve --admin ADDR` is set, a second HTTP server on `ADDR` serves:
+
+- `GET /healthz` - liveness, always `200 ok`.
+- `GET /readyz` - `200 ready` when a ledger read succeeds within 1s, else `503`.
+- `GET /metrics` - Prometheus text exposition (`text/plain; version=0.0.4`).
+
+The metrics carry no run-id labels. Counters: `leash_calls_total{decision,
+provider}`, `leash_stops_total{reason}`, `leash_tokens_total{kind}`,
+`leash_token_cost_usd_total`, `leash_blind_calls_total`,
+`leash_upstream_errors_total`. Gauges: `leash_build_info{version}`,
+`leash_active_runs`. See docs/deployment.md and docs/operations.md.
 
 ## Examples
 

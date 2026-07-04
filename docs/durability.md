@@ -195,11 +195,13 @@ $ leash kill demo
 leash: kill recorded for run demo; it stops on its next call
 ```
 
-The kill takes effect when the governing process next folds the journal, which is
-on the run's next call: that call is refused with `kill_switch`, and every call
-after it gets the same answer. `TestKillFromSecondHandleStopsGovernor` proves the
-cross-process path - a kill written through a second ledger handle stops a
-governor running against the same database.
+The kill takes effect on the run's next call: `AppendKill` writes both the
+durable journal entry and a fast cancel flag, so a warm governor observes it
+through the flag and a restarted one folds the journal entry - either way that
+call is refused with `kill_switch`, and every call after it gets the same answer.
+`TestKillFromSecondHandleStopsGovernor` proves the cross-process path - a kill
+written through a second ledger handle stops a governor running against the same
+database.
 
 ## Multiple instances and one database
 
@@ -216,5 +218,37 @@ non-blocking lease on the run. With the SQLite backend that lease is
 process-local: it stops one process from governing the same run twice, but it
 does not coordinate across processes. Because it is process-local, a crash
 releases it for free - there is nothing left holding it - so a restart can
-re-acquire and resume. True cross-process mutual exclusion, where two proxies
-must never govern one run simultaneously, needs the rerun Postgres backend.
+re-acquire and resume. The operating rule for SQLite is therefore one governor
+process per ledger; cross-process reads and writes (`ps`, `inspect`, `kill`) are
+fine, but two `leash serve` processes must not govern the same SQLite ledger.
+
+For true cross-process mutual exclusion, point `--db` at Postgres:
+
+```sh
+leash serve --db postgres://user:pass@host/leash --max-cost 20
+```
+
+A `postgres://` (or `postgresql://`) `--db` selects rerun's Postgres backend,
+whose lease is a session-scoped advisory lock: exactly one `leash serve` instance
+governs a given ledger, and the lock releases automatically if that instance's
+connection drops. That is active/passive HA. A second instance started with
+`--standby` waits for the lease and retries until it frees, then serves - so it
+takes over when the primary steps down. See docs/operations.md for the failover
+runbook. The takeover is tested in-process over a single SQLite handle, whose
+lease has the same one-at-a-time acquire and release semantics.
+
+## The warm-path cache
+
+The journal is the source of truth, but folding it in full on every call is
+O(journal) work - quadratic over a long run. The governing proxy keeps a warm
+cache of the folded state and the last journal sequence per run. On a warm call
+it checks the durable cancel flag with an indexed O(1) read instead of a full
+reload, evaluates on the cached state, appends the new call at the cached
+sequence, and folds that one record into the cache. A full fold happens only on
+first touch, after the run is evicted from memory, or when the store cannot serve
+the cancel flag. The cache never becomes authoritative: it is provably equal to a
+cold fold of the journal, and a later call to an evicted or restarted run rebuilds
+it and gets the same answer. This is why `leash kill` writes two signals - the
+durable journal entry that any reload folds, and the fast cancel flag the warm
+path polls - so a kill is seen within one call whether the governor is warm or
+cold.
