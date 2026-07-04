@@ -106,6 +106,28 @@ func (s *State) Fold(u Usage, fingerprint string, at time.Time, prices PriceTabl
 	s.TotalCost = s.TokenCost + s.ComputeCost
 }
 
+// pruneSamples bounds the rate-sample slice so it cannot grow with the run. With
+// no rate window it clears the slice (the samples are read only by the rate
+// limiter). Otherwise it keeps the last sample at or before now-window - the
+// rate baseline - and every sample after it, dropping the older ones in place.
+func (s *State) pruneSamples(window time.Duration, now time.Time) {
+	if window <= 0 {
+		s.Samples = nil
+		return
+	}
+	cutoff := now.Add(-window)
+	keepFrom := 0
+	for i, sm := range s.Samples {
+		if sm.At.After(cutoff) {
+			break
+		}
+		keepFrom = i
+	}
+	if keepFrom > 0 {
+		s.Samples = append(s.Samples[:0], s.Samples[keepFrom:]...)
+	}
+}
+
 // foldStall updates the stall streak. A blind (empty) fingerprint cannot be a
 // repeat and resets the streak; a matching fingerprint extends it; any other
 // fingerprint starts a new streak of one.

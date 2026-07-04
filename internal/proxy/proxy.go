@@ -561,7 +561,7 @@ const (
 	evictionSweepInterval = time.Minute
 )
 
-// sweepLoop evicts stopped, idle runs on a fixed interval until Shutdown.
+// sweepLoop evicts idle runs on a fixed interval until Shutdown.
 func (p *Proxy) sweepLoop() {
 	t := time.NewTicker(evictionSweepInterval)
 	defer t.Stop()
@@ -575,17 +575,17 @@ func (p *Proxy) sweepLoop() {
 	}
 }
 
-// evictIdle drops in-memory entries for runs stopped and idle at least
-// evictionIdleWindow, returning the count. Safe because the journal is the
-// source of truth: a later call cold-reloads and gets the same stop answer.
+// evictIdle drops in-memory entries for any run idle at least
+// evictionIdleWindow, stopped or not, returning the count. Evicting a still-open
+// run is safe because the journal is the source of truth: its next call
+// cold-reloads and folds to exactly the same state. This bounds memory to the
+// set of recently active runs, so a flood of distinct run ids (or a rotated
+// X-Loop-Id) cannot grow the map without limit.
 func (p *Proxy) evictIdle(now time.Time) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	evicted := 0
 	for id, rs := range p.runs {
-		if !rs.stopped.Load() {
-			continue
-		}
 		if now.Sub(time.Unix(0, rs.lastActiveNanos.Load())) >= evictionIdleWindow {
 			delete(p.runs, id)
 			delete(p.warnedBlind, id)
@@ -593,7 +593,7 @@ func (p *Proxy) evictIdle(now time.Time) int {
 		}
 	}
 	if evicted > 0 {
-		p.cfg.Logger.Debug("evicted stopped idle runs from memory", "count", evicted)
+		p.cfg.Logger.Debug("evicted idle runs from memory", "count", evicted)
 	}
 	return evicted
 }

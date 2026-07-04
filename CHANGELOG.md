@@ -18,6 +18,11 @@ metering-integrity gaps. It is the first release to change default behavior.
   behavior with `--on-blind=warn` (or `allow`). Set via `LEASH_ON_BLIND`.
 
 ### Fixed
+- **Unbounded in-memory growth.** Idle runs are now evicted whether or not they
+  have stopped (a running-but-idle run, or a rotated `X-Loop-Id`, was never
+  freed), and per-run rate samples are pruned to the rate window (and not kept at
+  all when no rate limit is set) instead of growing with every call. Memory is
+  now bounded by the set of recently active runs.
 - **Reasoning tokens were double-charged.** Reasoning tokens are a subset of the
   reported output tokens, but leash charged them at both the output and the
   reasoning rate, and double-counted them in the rate limiter. Now the

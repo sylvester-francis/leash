@@ -200,7 +200,22 @@ func (g *Governor) Evaluate(s *State, now time.Time) (reason string, tripped boo
 	return "", false
 }
 
-// Fold applies one recorded call to the state under the governor's prices.
+// Fold applies one recorded call to the state under the governor's prices, then
+// prunes rate samples to what the rate limiter still needs. Pruning here (not in
+// State.Fold) keeps the warm and cold fold paths identical, since both fold
+// through the governor.
 func (g *Governor) Fold(s *State, rec CallRecord) {
 	s.Fold(rec.Usage, rec.Fingerprint, rec.At, g.Prices)
+	s.pruneSamples(g.sampleWindow(), rec.At)
+}
+
+// sampleWindow is the rate limiter's trailing window, or 0 when no rate limit is
+// active (in which case rate samples are not needed at all).
+func (g *Governor) sampleWindow() time.Duration {
+	for _, b := range g.Boundaries {
+		if rl, ok := b.(RateLimit); ok {
+			return rl.Window
+		}
+	}
+	return 0
 }
