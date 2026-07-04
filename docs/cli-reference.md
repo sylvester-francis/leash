@@ -232,8 +232,9 @@ When `serve --admin ADDR` is set, a second HTTP server on `ADDR` serves:
 The metrics carry no run-id labels. Counters: `leash_calls_total{decision,
 provider}`, `leash_stops_total{reason}`, `leash_tokens_total{kind}`,
 `leash_token_cost_usd_total`, `leash_blind_calls_total`,
-`leash_upstream_errors_total`. Gauges: `leash_build_info{version}`,
-`leash_active_runs`. See docs/deployment.md and docs/operations.md.
+`leash_upstream_errors_total`, `leash_ledger_errors_total`. Gauges:
+`leash_build_info{version}`, `leash_active_runs`. See docs/deployment.md and
+docs/operations.md.
 
 ## Examples
 
@@ -244,8 +245,8 @@ leash --max-cost 5 --deadline 15m --prices prices.json -- python agent.py
 # Rate-limit and stall-guard a shell agent, no cost meter.
 leash --max-calls 500 --rate 200000/1m --stall 4 -- ./agent.sh
 
-# Run the gateway on all interfaces, port 8088.
-leash serve --listen 0.0.0.0:8088 --max-cost 20 --prices prices.json
+# Run the gateway on all interfaces, port 8088 (serve requires a token).
+LEASH_AUTH_TOKEN=$(leash gen-token) leash serve --listen 0.0.0.0:8088 --max-cost 20 --prices prices.json
 
 # Inspect and stop, from another terminal.
 leash ps --db ./team.db --prices prices.json

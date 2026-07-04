@@ -232,7 +232,7 @@ takeover.
 For true cross-process mutual exclusion, point `--db` at Postgres:
 
 ```sh
-leash serve --db postgres://user:pass@host/leash --max-cost 20
+LEASH_AUTH_TOKEN=$(cat /etc/leash/token) leash serve --db postgres://user:pass@host/leash --max-cost 20
 ```
 
 A `postgres://` (or `postgresql://`) `--db` selects rerun's Postgres backend,

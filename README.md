@@ -202,10 +202,12 @@ shared team gateway. Point the agent's `base_url` at leash and tag each run with
 an `X-Loop-Id` header so it gets its own durable budget:
 
 ```sh
-leash serve --listen :8088 --max-cost 5.00 --prices prices.json
+LEASH_AUTH_TOKEN=$(leash gen-token) leash serve --listen :8088 --max-cost 5.00 --prices prices.json
 ```
 
-On a shared gateway, add `--require-run-id` so untagged traffic is refused rather
+`serve` requires a token by default (clients send `X-Leash-Token`; use
+`--insecure` for a trusted local socket), and with auth on each run is scoped to
+the presenting credential. On a shared gateway, add `--require-run-id` so untagged traffic is refused rather
 than pooled into one budget, and `--admin :9090` for `/healthz`, `/readyz`, and a
 Prometheus `/metrics` endpoint on a separate listener. See
 [`docs/deployment.md`](docs/deployment.md).
@@ -461,11 +463,13 @@ economics of a loop; it does not judge the work.
 
 **Non-goals (deliberately not built):** no model routing, no dashboard or web UI,
 no provider SDK dependencies, no hosted anything, no request/response body
-persistence, no auth layer on the proxy (access control is the network's job),
-no TLS termination (front it with an ingress), no OpenTelemetry exporter (a
+persistence, no end-user identity auth (token auth and per-credential run
+isolation are built in, but caller identity belongs at an ingress or mesh), no
+TLS termination (front it with an ingress), no OpenTelemetry exporter (a
 Prometheus `/metrics` endpoint and an observer seam are there), no per-run-id
 metric labels, no journal retention yet (see docs/operations.md), and no YAML -
-flags and `LEASH_*` environment variables only.
+flags and `LEASH_*` environment variables only. See
+[`docs/known-issues.md`](docs/known-issues.md) for the deferred roadmap.
 
 ## Documentation
 

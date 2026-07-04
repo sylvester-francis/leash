@@ -28,10 +28,14 @@ Group=leash
 # The DB path must be writable by this user.
 Environment=LEASH_DB=/var/lib/leash/leash.db
 Environment=LEASH_PRICES=/etc/leash/prices.json
+# serve requires an auth token; keep it out of the unit file. Put
+# LEASH_AUTH_TOKEN=... in this root-only (chmod 600) env file.
+EnvironmentFile=/etc/leash/leash.env
 ExecStart=/usr/local/bin/leash serve \
   --listen 127.0.0.1:8088 \
   --admin 127.0.0.1:9090 \
   --max-cost 20 \
+  --shutdown-timeout 30s \
   --log-format json
 Restart=on-failure
 RestartSec=2
