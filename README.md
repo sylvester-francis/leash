@@ -492,6 +492,9 @@ flags and `LEASH_*` environment variables only. See
 - [`docs/examples.md`](docs/examples.md) - copy-paste recipes by task; runnable demos in [`examples/`](examples/README.md).
 - [`docs/known-issues.md`](docs/known-issues.md) - bounded behavior and the deferred roadmap, stated plainly.
 - [`docs/faq.md`](docs/faq.md) - honest answers, including what leash is not.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) - the layering, the request path, the invariants, and where to change things.
+- [`docs/adr/`](docs/adr/) - architecture decision records: why leash is built the way it is.
+- [`COMPATIBILITY.md`](COMPATIBILITY.md) - what is treated as a stable contract, and what is not.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - how to build, test, and propose changes.
 
 ## License
