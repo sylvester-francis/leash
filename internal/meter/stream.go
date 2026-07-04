@@ -30,13 +30,15 @@ import (
 // the bytes flow through to the client untouched. Construct one per streaming
 // call, run Tee, then read Result.
 type StreamMeter struct {
-	provider  Provider
-	model     string
-	input     int64
-	output    int64
-	reasoning int64
-	text      strings.Builder
-	hasUsage  bool
+	provider   Provider
+	model      string
+	input      int64
+	output     int64
+	reasoning  int64
+	cachedRead int64
+	cacheWrite int64
+	text       strings.Builder
+	hasUsage   bool
 }
 
 // NewStreamMeter returns a StreamMeter for the given provider.
@@ -69,10 +71,12 @@ func (m *StreamMeter) Tee(dst io.Writer, src io.Reader) error {
 func (m *StreamMeter) Result() Result {
 	return Result{
 		Usage: policy.Usage{
-			Model:           m.model,
-			InputTokens:     m.input,
-			OutputTokens:    m.output,
-			ReasoningTokens: m.reasoning,
+			Model:            m.model,
+			InputTokens:      m.input,
+			CachedReadTokens: m.cachedRead,
+			CacheWriteTokens: m.cacheWrite,
+			OutputTokens:     m.output,
+			ReasoningTokens:  m.reasoning,
 		},
 		Fingerprint: policy.Fingerprint(m.text.String()),
 		HasUsage:    m.hasUsage,
@@ -151,9 +155,9 @@ func (m *StreamMeter) applyOpenAIUsage(u *openAIUsage) {
 	if u == nil {
 		return
 	}
-	if in, out, reasoning, present := u.normalize(); present {
+	if in, out, reasoning, cachedRead, present := u.normalize(); present {
 		m.hasUsage = true
-		m.input, m.output, m.reasoning = in, out, reasoning
+		m.input, m.output, m.reasoning, m.cachedRead = in, out, reasoning, cachedRead
 	}
 }
 
@@ -185,7 +189,9 @@ func (m *StreamMeter) parseAnthropicData(data []byte) {
 		}
 		if e.Message.Usage != nil && e.Message.Usage.present() {
 			m.hasUsage = true
-			m.input = deref(e.Message.Usage.InputTokens)
+			m.input = e.Message.Usage.totalInput()
+			m.cachedRead = deref(e.Message.Usage.CacheReadInputTokens)
+			m.cacheWrite = deref(e.Message.Usage.CacheCreationInputTokens)
 			m.output = deref(e.Message.Usage.OutputTokens)
 		}
 	case "content_block_delta":

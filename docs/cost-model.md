@@ -41,11 +41,13 @@ budget is one of six boundaries evaluated in a fixed order; see
 ### The price table format
 
 A price table is a JSON object mapping a model name to its price in dollars per
-million tokens, with three rates: `input`, `output`, and `reasoning`.
+million tokens. The rates are `input`, `output`, `reasoning`, and the optional
+cache rates `cached_input` (cache reads) and `cache_write` (cache creation). An
+omitted cache rate falls back to the `input` rate.
 
 ```json
 {
-  "gpt-4o": {"input": 2.5, "output": 10, "reasoning": 0},
+  "gpt-4o": {"input": 2.5, "output": 10, "reasoning": 0, "cached_input": 1.25},
   "gpt-4":  {"input": 30,  "output": 60, "reasoning": 0},
   "o1":     {"input": 15,  "output": 60, "reasoning": 60}
 }
@@ -98,6 +100,18 @@ non-reasoning output at the `output` rate and the reasoning subset at the
 `reasoning` rate - each token once. When a model has no reasoning rate
 (`"reasoning": 0`, like `gpt-4o`), reasoning tokens fall under the `output` rate,
 so they are still priced, just not separately.
+
+### Cached tokens
+
+Providers report prompt-cache usage, and it is billed differently from fresh
+input: cache reads are cheaper, cache writes a little dearer. leash reads both
+wire shapes - OpenAI's `prompt_tokens_details.cached_tokens` (a subset of
+`prompt_tokens`) and Anthropic's separate `cache_read_input_tokens` /
+`cache_creation_input_tokens` - and prices the cached portion at `cached_input`
+and the written portion at `cache_write`. Because an omitted cache rate falls
+back to `input`, leaving them out is safe (it just prices cached tokens at the
+full input rate, as before), and setting them makes the meter match a provider
+invoice for a cache-heavy agent instead of over-counting it.
 
 ### leash never guesses
 

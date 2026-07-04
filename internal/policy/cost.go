@@ -33,8 +33,15 @@ const tokensPerMillion = 1_000_000.0
 type Usage struct {
 	// Model is the model name the provider billed, used to select a Price.
 	Model string `json:"model"`
-	// InputTokens is the prompt token count.
+	// InputTokens is the total prompt token count, including any cached or
+	// cache-written tokens.
 	InputTokens int64 `json:"input"`
+	// CachedReadTokens is the portion of InputTokens served from the provider's
+	// prompt cache, billed at the cache-read rate. A subset of InputTokens.
+	CachedReadTokens int64 `json:"cached_read,omitempty"`
+	// CacheWriteTokens is the portion of InputTokens written to the prompt cache,
+	// billed at the cache-write rate. A subset of InputTokens.
+	CacheWriteTokens int64 `json:"cache_write,omitempty"`
 	// OutputTokens is the completion token count.
 	OutputTokens int64 `json:"output"`
 	// ReasoningTokens is the reasoning/thinking token count when the provider
@@ -57,6 +64,12 @@ type Price struct {
 	OutputPerM float64 `json:"output"`
 	// ReasoningPerM is dollars per million reasoning tokens.
 	ReasoningPerM float64 `json:"reasoning"`
+	// CachedInputPerM is dollars per million cache-read input tokens; when zero,
+	// cached input is billed at the input rate.
+	CachedInputPerM float64 `json:"cached_input"`
+	// CacheWritePerM is dollars per million cache-write input tokens; when zero,
+	// cache writes are billed at the input rate.
+	CacheWritePerM float64 `json:"cache_write"`
 }
 
 // PriceTable maps a model name to its Price. A nil or missing entry means the
@@ -89,7 +102,22 @@ func TokenCost(u Usage, table PriceTable) float64 {
 	if reasoningRate == 0 {
 		reasoningRate = p.OutputPerM
 	}
-	return float64(u.InputTokens)/tokensPerMillion*p.InputPerM +
+	// Cached and cache-written tokens are a subset of the input, priced at their
+	// own rates; the rest of the input pays the full input rate. When a cache
+	// rate is unset it falls back to the input rate, so pricing without cache
+	// rates is unchanged (and never accidentally free).
+	cachedRate := p.CachedInputPerM
+	if cachedRate == 0 {
+		cachedRate = p.InputPerM
+	}
+	writeRate := p.CacheWritePerM
+	if writeRate == 0 {
+		writeRate = p.InputPerM
+	}
+	fullInput := max(0, u.InputTokens-u.CachedReadTokens-u.CacheWriteTokens)
+	return float64(fullInput)/tokensPerMillion*p.InputPerM +
+		float64(u.CachedReadTokens)/tokensPerMillion*cachedRate +
+		float64(u.CacheWriteTokens)/tokensPerMillion*writeRate +
 		float64(billableOutput)/tokensPerMillion*p.OutputPerM +
 		float64(reasoning)/tokensPerMillion*reasoningRate
 }

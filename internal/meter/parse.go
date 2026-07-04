@@ -39,11 +39,18 @@ type openAIUsage struct {
 	OutputTokensDetails struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
 	} `json:"output_tokens_details"`
+	PromptTokensDetails struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	InputTokensDetails struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
 }
 
-// normalize maps either OpenAI wire shape to input, output, and reasoning
-// counts, and reports whether any recognized token field was present.
-func (u *openAIUsage) normalize() (in, out, reasoning int64, present bool) {
+// normalize maps either OpenAI wire shape to input, output, reasoning, and
+// cached-input counts, and reports whether any recognized token field was
+// present. OpenAI's prompt/input token count already includes cached tokens.
+func (u *openAIUsage) normalize() (in, out, reasoning, cachedRead int64, present bool) {
 	if u.PromptTokens != nil {
 		in, present = *u.PromptTokens, true
 	}
@@ -57,19 +64,31 @@ func (u *openAIUsage) normalize() (in, out, reasoning int64, present bool) {
 		out, present = *u.OutputTokens, true
 	}
 	reasoning = u.CompletionTokensDetails.ReasoningTokens + u.OutputTokensDetails.ReasoningTokens
-	return in, out, reasoning, present
+	cachedRead = u.PromptTokensDetails.CachedTokens + u.InputTokensDetails.CachedTokens
+	return in, out, reasoning, cachedRead, present
 }
 
 // anthropicUsage is the usage block of an Anthropic response or stream event.
 // The pointers distinguish an absent field from a real zero (see openAIUsage).
+// Anthropic reports cache tokens separately from input_tokens, so the total
+// input is their sum (see totalInput).
 type anthropicUsage struct {
-	InputTokens  *int64 `json:"input_tokens"`
-	OutputTokens *int64 `json:"output_tokens"`
+	InputTokens              *int64 `json:"input_tokens"`
+	OutputTokens             *int64 `json:"output_tokens"`
+	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
 }
 
-// present reports whether the block carried either recognized token field.
+// present reports whether the block carried any recognized token field.
 func (u *anthropicUsage) present() bool {
-	return u.InputTokens != nil || u.OutputTokens != nil
+	return u.InputTokens != nil || u.OutputTokens != nil ||
+		u.CacheReadInputTokens != nil || u.CacheCreationInputTokens != nil
+}
+
+// totalInput is the full prompt token count: Anthropic's input_tokens excludes
+// cache tokens, so the cache-read and cache-write counts are added back.
+func (u *anthropicUsage) totalInput() int64 {
+	return deref(u.InputTokens) + deref(u.CacheReadInputTokens) + deref(u.CacheCreationInputTokens)
 }
 
 // deref returns *p, or 0 when p is nil.
@@ -133,13 +152,14 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 		}
 		res := Result{Fingerprint: policy.Fingerprint(text.String())}
 		if r.Usage != nil {
-			if in, out, reasoning, present := r.Usage.normalize(); present {
+			if in, out, reasoning, cachedRead, present := r.Usage.normalize(); present {
 				res.HasUsage = true
 				res.Usage = policy.Usage{
-					Model:           r.Model,
-					InputTokens:     in,
-					OutputTokens:    out,
-					ReasoningTokens: reasoning,
+					Model:            r.Model,
+					InputTokens:      in,
+					CachedReadTokens: cachedRead,
+					OutputTokens:     out,
+					ReasoningTokens:  reasoning,
 				}
 			}
 		}
@@ -159,9 +179,11 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 		if r.Usage != nil && r.Usage.present() {
 			res.HasUsage = true
 			res.Usage = policy.Usage{
-				Model:        r.Model,
-				InputTokens:  deref(r.Usage.InputTokens),
-				OutputTokens: deref(r.Usage.OutputTokens),
+				Model:            r.Model,
+				InputTokens:      r.Usage.totalInput(),
+				CachedReadTokens: deref(r.Usage.CacheReadInputTokens),
+				CacheWriteTokens: deref(r.Usage.CacheCreationInputTokens),
+				OutputTokens:     deref(r.Usage.OutputTokens),
 			}
 		}
 		return res, nil
