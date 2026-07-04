@@ -27,6 +27,10 @@ is busy, and tears down its servers on exit.
 | `demos/06-per-call-cap-and-blind.sh` | `--max-cost-per-call`, and fail-closed metering (`--on-blind=refuse` vs `warn`). |
 | `demos/07-admin-and-metrics.sh` | `/healthz`, `/readyz`, `leash healthcheck`, and the Prometheus `/metrics`. |
 
+`demos/smoke.sh` is not a showcase - it is the same harness driven as an
+asserting end-to-end test, run by CI to catch regressions in the whole path
+(meter, ledger, boundary body, admin surface).
+
 For copy-paste recipes you can adapt to real providers, see
 [`docs/examples.md`](../docs/examples.md).
 

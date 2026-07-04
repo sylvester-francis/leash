@@ -38,6 +38,18 @@ jobs:
           check-latest: true
       - run: make lint
 
+  smoke:
+    # End-to-end: brings up the fake upstream and a governed gateway and asserts
+    # a call is metered, the cost budget trips, and the admin surface responds.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          check-latest: true
+      - run: bash examples/demos/smoke.sh
+
   windows-build:
     # Signal forwarding to children is not supported on Windows (guarded by a
     # GOOS build tag), so Windows is build-only: no test run.
