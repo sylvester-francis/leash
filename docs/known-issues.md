@@ -29,10 +29,6 @@ docs cover the guarantees that *do* hold.
 - **Deadlines and rate windows use the wall clock.** A large NTP step can make a
   `--deadline` or `--rate` window measure slightly early or late. leash does not
   discipline the system clock.
-- **Ledger append idempotency edge case.** If a durable write commits but the
-  driver reports an error, the retry could in theory record one call twice
-  (an over-count, never an under-count). This is unconfirmed and
-  driver-dependent; the at-most-once path is otherwise proven by the crash tests.
 
 ## Roadmap (deferred, not yet built)
 
@@ -48,13 +44,13 @@ current releases, not overlooked. Each is tracked as a GitHub issue under the
   Budgets are per run (per credential when auth is on). A quota that nests
   call < run < team < org, with limits at each level, is not modeled yet.
 
-Two of the limitations above are also tracked for a fix: the Windows SQLite lock
-([#25](https://github.com/sylvester-francis/leash/issues/25)) and the append
-idempotency edge case ([#26](https://github.com/sylvester-francis/leash/issues/26)).
+The Windows SQLite lock ([#25](https://github.com/sylvester-francis/leash/issues/25))
+is also tracked for a fix.
 
 Soft limits and backpressure ([#22](https://github.com/sylvester-francis/leash/issues/22)),
 richer observability ([#23](https://github.com/sylvester-francis/leash/issues/23)),
-and a signed release supply chain ([#24](https://github.com/sylvester-francis/leash/issues/24))
+a signed release supply chain ([#24](https://github.com/sylvester-francis/leash/issues/24)),
+and idempotent ledger appends ([#26](https://github.com/sylvester-francis/leash/issues/26))
 have since shipped; see [security-model.md](security-model.md) for verifying a release.
 
 Have a use case that one of these blocks? Comment on the issue - it helps

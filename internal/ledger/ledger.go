@@ -451,6 +451,16 @@ func (l *Ledger) appendAt(ctx context.Context, runID, tag string, payload []byte
 		if err != nil {
 			return 0, fmt.Errorf("load journal to sequence append for run %s: %w", runID, err)
 		}
+		// Idempotency by tag. Every record's tag is unique to it (call-<index>,
+		// kill, stop), so if the tag is already in the journal, a prior append
+		// committed even though its caller saw an error, and this is a retry.
+		// Return the existing position instead of writing a duplicate, which a
+		// later fold would count twice.
+		for i := range logs {
+			if logs[i].Tag == tag {
+				return logs[i].Seq, nil
+			}
+		}
 		seq := 0
 		if n := len(logs); n > 0 {
 			seq = logs[n-1].Seq + 1 // LoadLogs returns rows in sequence order.
