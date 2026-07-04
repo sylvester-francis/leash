@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>leash - a spend governor for AI agents</title>
+<meta name="description" content="leash is a durable spend governor for AI agents: put it in front of an agent and it stops on cost, calls, time, rate, repetition, or a kill, with accounting that survives a crash.">
+<meta name="color-scheme" content="light dark">
+<meta property="og:type" content="website">
+<meta property="og:title" content="leash - a spend governor for AI agents">
+<meta property="og:description" content="leash is a durable spend governor for AI agents: put it in front of an agent and it stops on cost, calls, time, rate, repetition, or a kill, with accounting that survives a crash.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2288%22>🦮</text></svg>">
+<style>
+  :root {
+    --paper: #eef1f2;
+    --surface: #f7f8f9;
+    --ink: #14181c;
+    --muted: #59636b;
+    --faint: #8a949c;
+    --line: #d6dbde;
+    --line-strong: #c2c9cd;
+    --accent: #b4701f;
+    --accent-ink: #b4701f;
+    --accent-soft: rgba(180, 112, 31, 0.12);
+    --ok: #2f8f57;
+    --stop: #c0402a;
+
+    /* Terminal keeps its own dark world in both page themes. */
+    --term-bg: #0c1014;
+    --term-fg: #cfd6da;
+    --term-dim: #6b767e;
+    --term-line: #1e262c;
+    --term-ok: #5cc185;
+    --term-stop: #e8664b;
+    --term-amber: #e0a24a;
+
+    --maxw: 1120px;
+    --prose: 65ch;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --r: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0d1115;
+      --surface: #141a1f;
+      --ink: #e7ebed;
+      --muted: #99a3ab;
+      --faint: #6e787f;
+      --line: #232b31;
+      --line-strong: #303a41;
+      --accent: #e0a24a;
+      --accent-ink: #e6ab57;
+      --accent-soft: rgba(224, 162, 74, 0.14);
+      --ok: #5cc185;
+      --stop: #e8664b;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #eef1f2; --surface: #f7f8f9; --ink: #14181c; --muted: #59636b; --faint: #8a949c;
+    --line: #d6dbde; --line-strong: #c2c9cd;
+    --accent: #b4701f; --accent-ink: #b4701f; --accent-soft: rgba(180,112,31,0.12);
+    --ok: #2f8f57; --stop: #c0402a;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0d1115; --surface: #141a1f; --ink: #e7ebed; --muted: #99a3ab; --faint: #6e787f;
+    --line: #232b31; --line-strong: #303a41;
+    --accent: #e0a24a; --accent-ink: #e6ab57; --accent-soft: rgba(224,162,74,0.14);
+    --ok: #5cc185; --stop: #e8664b;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  a { color: var(--accent-ink); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+  .mono { font-family: var(--mono); }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before {
+    content: ""; width: 22px; height: 2px; background: var(--accent); display: inline-block;
+  }
+
+  h1, h2, h3 { text-wrap: balance; line-height: 1.12; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: clamp(24px, 3.4vw, 34px); font-weight: 650; }
+  h3 { font-size: 18px; font-weight: 640; }
+  p { margin: 0; }
+  .lead { color: var(--muted); font-size: clamp(16px, 1.9vw, 18px); max-width: 52ch; }
+
+  /* Gauge rule between sections: an instrument graduation. */
+  .rule { position: relative; height: 1px; background: var(--line); max-width: var(--maxw); margin: 0 auto; }
+  .rule::before, .rule::after {
+    content: ""; position: absolute; top: -3px; width: 1px; height: 7px; background: var(--accent);
+  }
+  .rule::before { left: 24px; }
+  .rule::after { right: 24px; }
+
+  section { padding: 72px 0; }
+
+  /* ---- top bar ---- */
+  header.bar {
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: saturate(1.1) blur(8px);
+    background: color-mix(in srgb, var(--paper) 82%, transparent);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar .wrap { display: flex; align-items: center; justify-content: space-between; height: 58px; }
+  .brand { font-family: var(--mono); font-weight: 640; font-size: 17px; letter-spacing: -0.02em; display: inline-flex; align-items: baseline; gap: 2px; }
+  .brand .dot { color: var(--accent); }
+  .navlinks { display: flex; gap: 22px; align-items: center; font-family: var(--mono); font-size: 13px; }
+  .navlinks a { color: var(--muted); }
+  .navlinks a:hover { color: var(--ink); text-decoration: none; }
+  .theme-btn {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    background: transparent; border: 1px solid var(--line-strong); border-radius: 999px;
+    padding: 4px 12px; cursor: pointer; letter-spacing: .04em;
+  }
+  .theme-btn:hover { color: var(--ink); border-color: var(--accent); }
+
+  /* ---- hero ---- */
+  .hero { padding-top: 66px; }
+  .hero-grid { display: grid; grid-template-columns: 1.02fr 1.15fr; gap: 54px; align-items: center; }
+  .hero h1 { font-size: clamp(34px, 5.4vw, 56px); font-weight: 680; letter-spacing: -0.025em; }
+  .hero h1 .u { background: linear-gradient(transparent 62%, var(--accent-soft) 62%); padding: 0 2px; }
+  .hero .lead { margin-top: 22px; max-width: 46ch; }
+  .cta-row { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+
+  .cmd {
+    font-family: var(--mono); font-size: 13.5px; background: var(--surface);
+    border: 1px solid var(--line-strong); border-radius: var(--r);
+    padding: 11px 13px; display: inline-flex; align-items: center; gap: 12px; color: var(--ink);
+  }
+  .cmd .prompt { color: var(--accent-ink); }
+  .cmd button {
+    font-family: var(--mono); font-size: 11px; color: var(--muted); background: transparent;
+    border: 1px solid var(--line-strong); border-radius: 6px; padding: 3px 8px; cursor: pointer;
+    letter-spacing: .05em; white-space: nowrap;
+  }
+  .cmd button:hover { color: var(--ink); border-color: var(--accent); }
+  .ghost {
+    font-family: var(--mono); font-size: 13px; color: var(--muted); border: 1px solid var(--line-strong);
+    border-radius: var(--r); padding: 11px 15px;
+  }
+  .ghost:hover { color: var(--ink); border-color: var(--accent); text-decoration: none; }
+
+  .hero-note { margin-top: 18px; font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: .02em; }
+
+  /* ---- terminal + gauge ---- */
+  .console { display: grid; grid-template-columns: 1fr 46px; gap: 14px; align-items: stretch; }
+  .term {
+    background: var(--term-bg); border: 1px solid var(--term-line); border-radius: 12px;
+    overflow: hidden; box-shadow: 0 18px 40px -22px rgba(0,0,0,.55);
+    font-family: var(--mono); font-size: 13px; line-height: 1.62; color: var(--term-fg);
+  }
+  .term-head { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--term-line); }
+  .term-head .lamp { width: 10px; height: 10px; border-radius: 50%; background: #2a333a; }
+  .term-head .title { margin-left: 8px; color: var(--term-dim); font-size: 11.5px; letter-spacing: .04em; }
+  .term-body { padding: 14px 16px 18px; min-height: 314px; }
+  .term-body .ln { white-space: pre-wrap; word-break: break-word; }
+  .term .p { color: var(--term-amber); }
+  .term .dim { color: var(--term-dim); }
+  .term .ok { color: var(--term-ok); }
+  .term .stop { color: var(--term-stop); }
+  .term .amber { color: var(--term-amber); }
+  .term .cursor { display: inline-block; width: 8px; height: 15px; background: var(--term-fg); vertical-align: -2px; animation: blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .gauge {
+    position: relative; border: 1px solid var(--term-line); border-radius: 12px; background: var(--term-bg);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .gauge .fill {
+    margin-top: auto; width: 100%; height: 0%;
+    background: linear-gradient(var(--term-ok), #3f9c67);
+    transition: height .5s cubic-bezier(.4,.9,.3,1), background .4s;
+  }
+  .gauge.tripped .fill { background: linear-gradient(var(--term-amber), #c98428); }
+  .gauge .limit { position: absolute; left: 0; right: 0; top: 6%; border-top: 1px dashed var(--term-amber); }
+  .gauge .limit span {
+    position: absolute; right: 3px; top: -16px; font-family: var(--mono); font-size: 9px;
+    color: var(--term-amber); letter-spacing: .06em;
+  }
+  .gauge .cap { position: absolute; bottom: 6px; left: 0; right: 0; text-align: center; font-family: var(--mono); font-size: 9px; color: var(--term-dim); }
+
+  .replay {
+    margin-top: 12px; font-family: var(--mono); font-size: 12px; color: var(--muted);
+    background: transparent; border: 1px solid var(--line-strong); border-radius: 8px;
+    padding: 5px 12px; cursor: pointer; letter-spacing: .04em;
+  }
+  .replay:hover { color: var(--ink); border-color: var(--accent); }
+
+  /* ---- generic grids ---- */
+  .cols-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .cols-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px 22px 20px;
+  }
+  .card h3 { margin-bottom: 8px; }
+  .card p { color: var(--muted); font-size: 14.5px; }
+  .card .tag { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); }
+
+  .section-head { margin-bottom: 34px; max-width: 60ch; }
+  .section-head .lead { margin-top: 12px; }
+
+  /* ---- boundaries gauge row ---- */
+  .bounds { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--surface); }
+  .bound { padding: 20px 18px; border-right: 1px solid var(--line); position: relative; }
+  .bound:last-child { border-right: none; }
+  .bound .n { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .bound .nm { font-family: var(--mono); font-weight: 640; font-size: 15px; margin: 10px 0 8px; letter-spacing: -.01em; }
+  .bound .fl { font-family: var(--mono); font-size: 11.5px; color: var(--accent-ink); }
+  .bound .ds { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .bound .stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: .0; }
+  .bound:hover .stripe { opacity: .9; }
+
+  /* ---- examples ---- */
+  .ex { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; display: flex; flex-direction: column; }
+  .ex .top { padding: 16px 18px 4px; }
+  .ex .top .k { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); }
+  .ex .top h3 { margin-top: 7px; font-size: 16px; }
+  .ex .top p { color: var(--muted); font-size: 13.5px; margin-top: 6px; }
+  .ex pre {
+    margin: 14px 0 0; background: var(--term-bg); color: var(--term-fg);
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.65; padding: 15px 16px;
+    overflow-x: auto; border-top: 1px solid var(--term-line); flex: 1;
+  }
+  .ex pre .p { color: var(--term-amber); }
+  .ex pre .c { color: var(--term-dim); }
+  .ex pre .ok { color: var(--term-ok); }
+  .ex pre .stop { color: var(--term-stop); }
+  .ex .whats { padding: 12px 18px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); display: flex; gap: 9px; }
+  .ex .whats b { color: var(--ink); font-weight: 600; }
+  .ex .whats .arw { color: var(--accent-ink); font-family: var(--mono); }
+
+  /* ---- compare ---- */
+  .cmp { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .cmp .col { border: 1px solid var(--line); border-radius: var(--r); padding: 22px; background: var(--surface); }
+  .cmp .col.leash { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+  .cmp .col h3 { font-size: 15px; font-family: var(--mono); letter-spacing: -.01em; }
+  .cmp .col.leash h3 { color: var(--accent-ink); }
+  .cmp .col p { color: var(--muted); font-size: 14px; margin-top: 10px; }
+  .cmp .col .verdict { margin-top: 14px; font-family: var(--mono); font-size: 12px; color: var(--ink); padding-top: 12px; border-top: 1px solid var(--line); }
+
+  /* ---- footer / install ---- */
+  .install-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: start; }
+  .steps { display: flex; flex-direction: column; gap: 10px; }
+  .step-cmd { font-family: var(--mono); font-size: 13.5px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r); padding: 12px 14px; overflow-x: auto; }
+  .step-cmd .p { color: var(--accent-ink); }
+  .step-cmd .c { color: var(--faint); }
+  footer { border-top: 1px solid var(--line); padding: 40px 0 64px; color: var(--muted); }
+  footer .frow { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 18px; align-items: center; }
+  footer .flinks { display: flex; gap: 20px; font-family: var(--mono); font-size: 13px; }
+  footer .flinks a { color: var(--muted); }
+  footer small { font-family: var(--mono); color: var(--faint); font-size: 12px; }
+
+  .honest { font-size: 13px; color: var(--faint); font-family: var(--mono); margin-top: 18px; line-height: 1.6; }
+
+  @media (max-width: 900px) {
+    .hero-grid, .install-grid { grid-template-columns: 1fr; gap: 40px; }
+    .cols-3, .cmp { grid-template-columns: 1fr; }
+    .cols-2 { grid-template-columns: 1fr; }
+    .bounds { grid-template-columns: 1fr 1fr; }
+    .bound { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    section { padding: 56px 0; }
+    .navlinks a:not(.gh) { display: none; }
+  }
+  @media (max-width: 560px) {
+    .bounds { grid-template-columns: 1fr; }
+    .console { grid-template-columns: 1fr; }
+    .gauge { height: 60px; flex-direction: row; }
+    .gauge .fill { margin-top: 0; margin-left: 0; height: 100% !important; width: var(--w, 0%); transition: width .5s; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .term .cursor { animation: none; }
+    .gauge .fill { transition: none; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <span class="brand">leash<span class="dot">.</span></span>
+    <nav class="navlinks">
+      <a href="#why">Why</a>
+      <a href="#use">How to use</a>
+      <a href="#examples">Examples</a>
+      <a class="gh" href="https://github.com/sylvester-francis/leash">GitHub</a>
+      <button class="theme-btn" id="themeBtn" aria-label="Toggle color theme">theme</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Spend governor for AI agents</p>
+        <h1>Stop your agent before it <span class="u">burns the budget</span>.</h1>
+        <p class="lead">
+          An AI agent runs in a loop, deciding its own next step. It can loop longer,
+          cost more, or repeat itself with no natural place to stop. leash sits in
+          front of its model calls and enforces a hard stop on a limit you set - and
+          the accounting survives a crash, so a restart can't reset the budget.
+        </p>
+        <div class="cta-row">
+          <span class="cmd">
+            <span><span class="prompt">$</span> go install github.com/sylvester-francis/leash/cmd/leash@latest</span>
+            <button data-copy="go install github.com/sylvester-francis/leash/cmd/leash@latest">copy</button>
+          </span>
+        </div>
+        <p class="hero-note">one binary // no code change in the simplest mode // Go 1.25+, no C toolchain</p>
+      </div>
+
+      <div>
+        <div class="console">
+          <div class="term" aria-label="Terminal running the leash demo">
+            <div class="term-head">
+              <span class="lamp"></span><span class="lamp"></span><span class="lamp"></span>
+              <span class="title">leash - demo run, $0.10 budget</span>
+            </div>
+            <div class="term-body" id="termBody"></div>
+          </div>
+          <div class="gauge" id="gauge" aria-hidden="true">
+            <div class="limit"><span>$0.10</span></div>
+            <div class="fill" id="gaugeFill"></div>
+            <div class="cap">spend</div>
+          </div>
+        </div>
+        <button class="replay" id="replay">&#8635; replay</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section id="why">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">The problem</p>
+        <h2>Loops don't know when to quit.</h2>
+        <p class="lead">Three gaps leash is built to close. If you've watched a token bill or a
+          job run longer than you meant, you've met at least one of them.</p>
+      </div>
+      <div class="cols-3">
+        <div class="card">
+          <div class="tag">Runaway cost &amp; time</div>
+          <h3 style="margin-top:12px">A step is not a flat price</h3>
+          <p>Each turn can call a bigger model, send a longer context, or spawn more work.
+            Cost per step is not constant, and a stuck agent can keep paying to get nowhere.</p>
+        </div>
+        <div class="card">
+          <div class="tag">Not durable</div>
+          <h3 style="margin-top:12px">"Max steps" resets on restart</h3>
+          <p>A framework's step limit lives in memory. Crash the process and start it again and
+            the counter is back to zero - the budget silently reopens.</p>
+        </div>
+        <div class="card">
+          <div class="tag">Too coarse, too late</div>
+          <h3 style="margin-top:12px">Provider caps are per-key</h3>
+          <p>A spending cap on an API key is a monthly total across everything, reported after
+            the fact. It can't stop one runaway run in the moment.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section id="boundaries">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">What it enforces</p>
+        <h2>Six boundaries, one fixed order.</h2>
+        <p class="lead">You set the limits; leash checks them before every call and refuses the
+          next one the moment the first boundary trips. A zero value turns a boundary off;
+          the kill switch is always on.</p>
+      </div>
+      <div class="bounds">
+        <div class="bound"><span class="stripe"></span><div class="n">01</div><div class="nm">kill</div><div class="fl">leash kill &lt;run&gt;</div><div class="ds">You stop it by hand, from anywhere.</div></div>
+        <div class="bound"><span class="stripe"></span><div class="n">02</div><div class="nm">deadline</div><div class="fl">--deadline 15m</div><div class="ds">Wall-clock since the first call.</div></div>
+        <div class="bound"><span class="stripe"></span><div class="n">03</div><div class="nm">cost</div><div class="fl">--max-cost 5</div><div class="ds">Token + compute dollars.</div></div>
+        <div class="bound"><span class="stripe"></span><div class="n">04</div><div class="nm">calls</div><div class="fl">--max-calls 100</div><div class="ds">Number of model calls made.</div></div>
+        <div class="bound"><span class="stripe"></span><div class="n">05</div><div class="nm">rate</div><div class="fl">--rate 100000/1m</div><div class="ds">Tokens in a trailing window.</div></div>
+        <div class="bound"><span class="stripe"></span><div class="n">06</div><div class="nm">stall</div><div class="fl">--stall 4</div><div class="ds">Same reply N times in a row.</div></div>
+      </div>
+      <p class="honest">The refusal is an ordinary HTTP 429 with a machine-readable reason, so the agent's own
+        loop ends because its next call fails. Token counts come only from what the provider reports on the wire -
+        never estimated.</p>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section id="use">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">How to use it</p>
+        <h2>Three front doors, one engine.</h2>
+        <p class="lead">Same governor behind each. Pick the one that fits how your agent runs.</p>
+      </div>
+      <div class="cols-3">
+        <div class="card">
+          <div class="tag">1 - Wrap</div>
+          <h3 style="margin-top:12px">Put leash before your command</h3>
+          <p style="margin-bottom:14px">Zero code change. leash launches your program as a child and points its
+            SDK's base URL at an embedded proxy, so every model call is governed.</p>
+          <div class="step-cmd mono"><span class="p">$</span> leash --max-cost 5 -- python my_agent.py</div>
+        </div>
+        <div class="card">
+          <div class="tag">2 - Serve</div>
+          <h3 style="margin-top:12px">Run it as a gateway</h3>
+          <p style="margin-bottom:14px">A standalone proxy for any language, CI, or a shared team endpoint. Point
+            a client's <span class="mono">base_url</span> at leash and tag each run with a header.</p>
+          <div class="step-cmd mono"><span class="p">$</span> leash serve --listen :8088 --max-cost 20</div>
+        </div>
+        <div class="card">
+          <div class="tag">3 - Inspect &amp; control</div>
+          <h3 style="margin-top:12px">See and stop runs</h3>
+          <p style="margin-bottom:14px">The ledger is readable from any terminal. List active runs, read one
+            run's history, or stop a runaway - it takes effect on its next call.</p>
+          <div class="step-cmd mono"><span class="p">$</span> leash ps<br><span class="p">$</span> leash kill nightly-batch-7</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section id="examples">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Examples</p>
+        <h2>Copy, paste, and watch it stop.</h2>
+        <p class="lead">Concrete recipes for the common cases. Each shows the command and, in one line, what happens.</p>
+      </div>
+
+      <div class="cols-2" style="margin-bottom:20px">
+
+        <div class="ex">
+          <div class="top">
+            <div class="k">No key, no spend</div>
+            <h3>The 60-second demo</h3>
+            <p>A std-lib fake provider plus a curl loop under a 10-cent budget. Nothing real is billed.</p>
+          </div>
+          <pre><span class="c"># fake provider + your own prices</span>
+<span class="p">$</span> go run ./examples/fakeupstream &amp;
+<span class="p">$</span> echo '{"demo-model":{"input":10,"output":30}}' &gt; prices.json
+<span class="p">$</span> leash --max-cost 0.10 --prices prices.json \
+      --upstream http://127.0.0.1:9099 -- ./agent.sh
+call 1 -&gt; <span class="ok">200</span>   call 4 -&gt; <span class="ok">200</span>
+call 5 -&gt; <span class="stop">429</span>   <span class="c">... stays stopped</span></pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>Each call is 2.5c, so the budget <b>trips on the fifth</b>.</span></div>
+        </div>
+
+        <div class="ex">
+          <div class="top">
+            <div class="k">Tier 1 - wrap</div>
+            <h3>Guard a Python agent</h3>
+            <p>A dollar budget and a wall-clock deadline around any script. No SDK to adopt.</p>
+          </div>
+          <pre><span class="p">$</span> leash --max-cost 5 --deadline 15m \
+      --prices prices.json -- python agent.py
+<span class="c">... agent runs, every call metered ...</span>
+leash: <span class="stop">stopped</span> run a3f9 after 18 calls,
+  $4.10 tokens + $0.91 compute = $5.01 (cost_budget)
+<span class="p">$</span> echo $?
+<span class="stop">3</span></pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>On a boundary stop leash exits <b>code 3</b>, so a script can tell it apart from a normal failure.</span></div>
+        </div>
+
+        <div class="ex">
+          <div class="top">
+            <div class="k">Tier 1 - wrap</div>
+            <h3>Cap a loop with no cost meter</h3>
+            <p>When you have no prices, lean on calls, token rate, and repetition instead.</p>
+          </div>
+          <pre><span class="p">$</span> leash --max-calls 500 \
+      --rate 200000/1m \
+      --stall 4 -- ./agent.sh</pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>Stops at 500 calls, on a token-rate spike, or after <b>4 identical replies</b> in a row.</span></div>
+        </div>
+
+        <div class="ex">
+          <div class="top">
+            <div class="k">Tier 2 - serve</div>
+            <h3>Shared gateway, per-run budgets</h3>
+            <p>One proxy in front of many agents. Each run carries its own <span class="mono">X-Loop-Id</span> and its own budget.</p>
+          </div>
+          <pre><span class="p">$</span> leash serve --listen :8088 --max-cost 20 \
+      --prices prices.json --require-run-id
+
+<span class="c"># the client, any language:</span>
+<span class="p">$</span> curl http://localhost:8088/v1/chat/completions \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -H "X-Loop-Id: nightly-batch-7" \
+    -d '{"model":"gpt-4o", ...}'</pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>Different <b>X-Loop-Id</b> values get independent budgets, stops, and kills.</span></div>
+        </div>
+
+        <div class="ex">
+          <div class="top">
+            <div class="k">Tier 2 - serve</div>
+            <h3>Point an SDK at it</h3>
+            <p>leash speaks the OpenAI and Anthropic wire formats, so only the base URL changes.</p>
+          </div>
+          <pre><span class="c"># Python, OpenAI SDK</span>
+client = OpenAI(
+    base_url=<span class="ok">"http://localhost:8088/v1"</span>,
+    api_key="sk-...",  <span class="c"># forwarded untouched</span>
+    default_headers={"X-Loop-Id": "run-42"},
+)</pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>Your key is <b>forwarded upstream untouched</b> and never logged or stored.</span></div>
+        </div>
+
+        <div class="ex">
+          <div class="top">
+            <div class="k">Resume</div>
+            <h3>Pick a budget back up</h3>
+            <p>Name a run and reuse the name against the same database to continue its account.</p>
+          </div>
+          <pre><span class="p">$</span> leash --run nightly --db ./run.db \
+      --max-cost 5 -- python agent.py
+<span class="c"># later, same name + db: the budget</span>
+<span class="c"># continues where it left off, even</span>
+<span class="c"># after a crash. It never re-spends.</span></pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>Totals are rebuilt from a durable journal, so a restart <b>can't double-count</b>.</span></div>
+        </div>
+
+      </div>
+
+      <div class="cols-2">
+        <div class="ex">
+          <div class="top">
+            <div class="k">Docker</div>
+            <h3>Run the gateway in a container</h3>
+            <p>A small distroless image that runs as a non-root user, with the ledger on a volume.</p>
+          </div>
+          <pre><span class="p">$</span> make docker              <span class="c"># distroless, nonroot</span>
+<span class="p">$</span> docker run -p 8088:8088 -v leash-data:/data \
+    leash:dev serve --db /data/leash.db --max-cost 20
+
+<span class="c"># or the no-key demo, gateway + fake upstream:</span>
+<span class="p">$</span> docker compose up --build</pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>Add <b>--admin :9090</b> for <span class="mono">/healthz</span>, <span class="mono">/readyz</span>, and Prometheus <span class="mono">/metrics</span>.</span></div>
+        </div>
+
+        <div class="ex">
+          <div class="top">
+            <div class="k">Observe</div>
+            <h3>Read the ledger, anytime</h3>
+            <p>Every run's account is on disk. Inspect it live, in a table or as JSON.</p>
+          </div>
+          <pre><span class="p">$</span> leash ps
+RUN              CALLS  TOTAL$  STATUS   REASON
+nightly-batch-7  18     5.01    <span class="stop">stopped</span>  cost_budget
+api-eval-3       6      1.20    running
+
+<span class="p">$</span> leash inspect nightly-batch-7 --json</pre>
+          <div class="whats"><span class="arw">-&gt;</span><span>The ledger holds usage numbers and timestamps only - <b>never bodies or secrets</b>.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section id="compare">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Where it fits</p>
+        <h2>Not the same as the caps you already have.</h2>
+      </div>
+      <div class="cmp">
+        <div class="col">
+          <h3>Framework max-steps</h3>
+          <p>Bounds the number of loop iterations, in memory, for this process.</p>
+          <div class="verdict">Resets on restart. No dollars, no cross-process view.</div>
+        </div>
+        <div class="col">
+          <h3>Provider key cap</h3>
+          <p>A monthly spend total on an API key, across every run and app that uses it.</p>
+          <div class="verdict">Per-key, not per-run. Reported after the fact.</div>
+        </div>
+        <div class="col leash">
+          <h3>leash</h3>
+          <p>Durable per-run accounting that a restart can't reset, enforced in the moment, on your terms.</p>
+          <div class="verdict">Per-run. Survives crashes. Stops the next call.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section id="install">
+    <div class="wrap install-grid">
+      <div>
+        <p class="eyebrow">Get started</p>
+        <h2>Three ways to install.</h2>
+        <p class="lead" style="margin-top:14px">A single static binary. Grab a release, use the Go toolchain, or build from a checkout.</p>
+        <p class="honest">Prices are yours to supply with <span class="mono">--prices</span>; leash ships none and never
+          estimates. Without a price table the cost meter is blind, and leash says so, once and loudly - lean on
+          calls, deadline, rate, and kill.</p>
+      </div>
+      <div class="steps">
+        <div class="step-cmd"><span class="c"># prebuilt binary (linux / mac / windows)</span><br>github.com/sylvester-francis/leash/releases</div>
+        <div class="step-cmd"><span class="p">$</span> go install github.com/sylvester-francis/leash/cmd/leash@latest</div>
+        <div class="step-cmd"><span class="p">$</span> git clone github.com/sylvester-francis/leash<br><span class="p">$</span> cd leash &amp;&amp; make build   <span class="c"># -&gt; ./leash</span></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap frow">
+      <div>
+        <span class="brand">leash<span class="dot">.</span></span>
+        <small style="display:block;margin-top:8px">Durable spend governor for AI agents. Apache-2.0.</small>
+      </div>
+      <div class="flinks">
+        <a href="https://github.com/sylvester-francis/leash">GitHub</a>
+        <a href="https://github.com/sylvester-francis/leash/tree/main/docs">Docs</a>
+        <a href="https://github.com/sylvester-francis/leash/blob/main/docs/getting-started.md">Getting started</a>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- theme toggle ----
+  var root = document.documentElement;
+  var btn = document.getElementById("themeBtn");
+  function current() {
+    var set = root.getAttribute("data-theme");
+    if (set) return set;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  btn.addEventListener("click", function () {
+    var next = current() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+  });
+
+  // ---- copy buttons ----
+  document.querySelectorAll("[data-copy]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var t = b.getAttribute("data-copy");
+      navigator.clipboard && navigator.clipboard.writeText(t).then(function () {
+        var old = b.textContent; b.textContent = "copied"; b.style.color = "var(--accent-ink)";
+        setTimeout(function () { b.textContent = old; b.style.color = ""; }, 1400);
+      });
+    });
+  });
+
+  // ---- terminal demo ----
+  var body = document.getElementById("termBody");
+  var gauge = document.getElementById("gauge");
+  var fill = document.getElementById("gaugeFill");
+  var replayBtn = document.getElementById("replay");
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var isNarrow = window.matchMedia("(max-width: 560px)").matches;
+
+  // Each entry: [html, delay-after-ms, gauge-percent-or-null, trip?]
+  // Budget is $0.10; four allowed calls at 2.5c each fill to the limit line (top 6%).
+  var TOP = 6, FULL = 94; // fill % that reaches the dashed limit
+  function pct(calls) { return Math.min(FULL, calls * (FULL / 4)); }
+
+  var script = [
+    ['<span class="p">$</span> leash --max-cost <span class="amber">0.10</span> --prices prices.json -- ./agent.sh', 520, 0, false],
+    ['<span class="dim">... proxy up, governing every call ...</span>', 420, null, false],
+    ['agent call 1  ->  <span class="ok">HTTP 200</span>', 300, pct(1), false],
+    ['agent call 2  ->  <span class="ok">HTTP 200</span>', 300, pct(2), false],
+    ['agent call 3  ->  <span class="ok">HTTP 200</span>', 300, pct(3), false],
+    ['agent call 4  ->  <span class="ok">HTTP 200</span>', 380, pct(4), false],
+    ['agent call 5  ->  <span class="stop">HTTP 429</span>  <span class="dim">leash_boundary</span>', 300, pct(4), true],
+    ['agent call 6  ->  <span class="stop">HTTP 429</span>  <span class="dim">stays stopped</span>', 460, pct(4), true],
+    ['<span class="amber">leash: stopped run demo after 4 calls,</span>', 130, pct(4), true],
+    ['<span class="amber">  $0.10 tokens + $0.00 compute = $0.10 (cost_budget)</span>', 520, pct(4), true],
+    ['<span class="p">$</span> echo $?', 260, null, true],
+    ['<span class="stop">3</span>', 0, null, true]
+  ];
+
+  var timers = [];
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+
+  function setGauge(p, trip) {
+    if (p === null) return;
+    if (isNarrow) { fill.style.setProperty("--w", p + "%"); }
+    else { fill.style.height = p + "%"; }
+    if (trip) gauge.classList.add("tripped");
+  }
+
+  function render(withMotion) {
+    clearTimers();
+    body.innerHTML = "";
+    gauge.classList.remove("tripped");
+    if (isNarrow) fill.style.setProperty("--w", "0%"); else fill.style.height = "0%";
+
+    if (!withMotion) {
+      script.forEach(function (row) {
+        var d = document.createElement("div");
+        d.className = "ln"; d.innerHTML = row[0]; body.appendChild(d);
+        setGauge(row[2], row[3]);
+      });
+      var cur = document.createElement("span"); cur.className = "ln"; cur.innerHTML = '<span class="p">$</span> <span class="cursor"></span>';
+      body.appendChild(cur);
+      return;
+    }
+
+    var t = 0;
+    script.forEach(function (row, i) {
+      timers.push(setTimeout(function () {
+        var d = document.createElement("div");
+        d.className = "ln"; d.innerHTML = row[0]; body.appendChild(d);
+        setGauge(row[2], row[3]);
+      }, t));
+      t += row[1];
+    });
+    timers.push(setTimeout(function () {
+      var cur = document.createElement("span"); cur.className = "ln";
+      cur.innerHTML = '<span class="p">$</span> <span class="cursor"></span>';
+      body.appendChild(cur);
+    }, t + 120));
+  }
+
+  // Kick off when the hero is on screen (or immediately if no observer support).
+  var started = false;
+  function start() { if (started) return; started = true; render(!reduced); }
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (ents) {
+      ents.forEach(function (e) { if (e.isIntersecting) { start(); io.disconnect(); } });
+    }, { threshold: 0.25 });
+    io.observe(document.getElementById("termBody"));
+  } else { start(); }
+
+  replayBtn.addEventListener("click", function () { started = true; render(!reduced); });
+})();
+</script>
+</body>
+</html>

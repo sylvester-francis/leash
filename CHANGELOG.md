@@ -7,6 +7,8 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-03
+
 Production hardening and release engineering.
 
 ### Added
@@ -29,6 +31,7 @@ Production hardening and release engineering.
 - Release tooling: Dockerfile, docker-compose demo, GoReleaser config, CI
   (build/vet/test/race/ascii/doc-check across Linux, macOS, and a Windows
   build), a nightly mutation-testing workflow, and a PostgreSQL CI job.
+- A shareable landing page under `site/`, deployed to GitHub Pages.
 
 ### Changed
 - `leash kill` now writes both the durable journal entry and a fast cancel flag
@@ -44,5 +47,6 @@ Production hardening and release engineering.
   stream teeing, the wrapper, the standalone gateway, and the `ps`, `inspect`,
   and `kill` commands.
 
-[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/sylvester-francis/leash/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sylvester-francis/leash/releases/tag/v0.1.0
