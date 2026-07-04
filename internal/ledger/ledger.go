@@ -59,19 +59,33 @@ const appendRetries = 8
 type Ledger struct {
 	store  rerun.Store
 	closer io.Closer
+	// lockPath is the sidecar lock file for a SQLite ledger, empty otherwise. It
+	// backs a cross-process governance lock that the in-process SQLite lease
+	// cannot provide.
+	lockPath string
 }
 
 // Lease is a held run lease. Release it when governing ends.
 type Lease struct {
-	release io.Closer
+	release  io.Closer
+	fileLock io.Closer
 }
 
 // Release returns the lease. It is safe to call once.
 func (le *Lease) Release() error {
-	if le == nil || le.release == nil {
+	if le == nil {
 		return nil
 	}
-	return le.release.Close()
+	var err error
+	if le.fileLock != nil {
+		err = le.fileLock.Close()
+	}
+	if le.release != nil {
+		if rerr := le.release.Close(); rerr != nil && err == nil {
+			err = rerr
+		}
+	}
+	return err
 }
 
 // Open opens (or creates) a ledger from a data-source string. A dsn beginning
@@ -118,7 +132,7 @@ func openSQLite(path string) (l *Ledger, err error) {
 		}
 	}()
 	store := sqlite.New(path)
-	return &Ledger{store: store, closer: store}, nil
+	return &Ledger{store: store, closer: store, lockPath: path + ".govlock"}, nil
 }
 
 // Close releases the underlying store.
@@ -129,10 +143,12 @@ func (l *Ledger) Close() error {
 	return l.closer.Close()
 }
 
-// Acquire tries to lease the run for governing. It is non-blocking: acquired is
-// false when the lease is already held. For the SQLite backend the lease is
-// process-local (it guards against governing the same run twice inside one
-// process); cross-process mutual exclusion requires the postgres backend.
+// Acquire tries to lease the ledger for governing. It is non-blocking: acquired
+// is false when the lease is already held. The store's in-process lease guards
+// against two governors inside one process; for SQLite an exclusive OS lock on a
+// sidecar file adds the cross-process guarantee (on unix), so a second process
+// governing the same file is refused rather than silently double-spending.
+// Postgres needs no OS lock: its lease is already a cross-process advisory lock.
 func (l *Ledger) Acquire(ctx context.Context, runID string) (*Lease, bool, error) {
 	release, acquired, err := l.store.Acquire(ctx, runID)
 	if err != nil {
@@ -141,7 +157,20 @@ func (l *Ledger) Acquire(ctx context.Context, runID string) (*Lease, bool, error
 	if !acquired {
 		return nil, false, nil
 	}
-	return &Lease{release: release}, true, nil
+	var fileLock io.Closer
+	if l.lockPath != "" {
+		fl, ok, lerr := acquireFileLock(l.lockPath)
+		if lerr != nil {
+			_ = release.Close()
+			return nil, false, fmt.Errorf("acquire governance lock %s: %w", l.lockPath, lerr)
+		}
+		if !ok {
+			_ = release.Close()
+			return nil, false, nil // another process already governs this ledger
+		}
+		fileLock = fl
+	}
+	return &Lease{release: release, fileLock: fileLock}, true, nil
 }
 
 // EnsureRun creates the run if it is new. Resuming an existing run is not an

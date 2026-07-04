@@ -31,6 +31,11 @@ metering-integrity gaps. It is the first release to change default behavior.
 - **Client-disconnect metering bypass.** The call record is written with a
   detached context, so a client that drops the connection mid-stream can no
   longer prevent the call from being metered.
+- **SQLite double-governor / split-brain.** rerun's SQLite lease is process-local,
+  so two `leash serve` on one file both governed and double-spent. leash now takes
+  an exclusive OS lock (`flock`) on a `<db>.govlock` sidecar (Unix), so a second
+  governor is refused. `--standby` on a SQLite `--db` is now rejected up front
+  (it requires Postgres) instead of silently providing no mutual exclusion.
 - **Ledger writes now fail closed.** A run whose call record fails to persist is
   refused (503) on its next call until a write probe confirms the ledger
   recovered, instead of forwarding more unmetered spend. `EnsureRun` only treats
