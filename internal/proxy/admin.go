@@ -16,6 +16,8 @@ package proxy
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"io"
 	"net/http"
 	"time"
@@ -37,8 +39,28 @@ type ActiveRunsSource interface {
 // NewAdminServer builds the admin server: GET /healthz (always 200), /readyz
 // (200 when the ledger probe succeeds within readyTimeout, else 503), and
 // /metrics. It is separate from the proxy listener so it never collides with
-// proxied paths and can be network-segmented. metrics may be nil.
-func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, metrics *Metrics) *http.Server {
+// proxied paths and can be network-segmented. metrics may be nil. When
+// authTokens is non-empty, /metrics requires a matching X-Leash-Token; health
+// and readiness stay open so orchestrator probes need no credential.
+func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, metrics *Metrics, authTokens []string) *http.Server {
+	var digests [][32]byte
+	for _, tok := range authTokens {
+		if tok != "" {
+			digests = append(digests, sha256.Sum256([]byte(tok)))
+		}
+	}
+	metricsAuthorized := func(r *http.Request) bool {
+		if len(digests) == 0 {
+			return true
+		}
+		got := sha256.Sum256([]byte(r.Header.Get(authHeader)))
+		match := 0
+		for i := range digests {
+			match |= subtle.ConstantTimeCompare(got[:], digests[i][:])
+		}
+		return match == 1
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +91,10 @@ func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, m
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if !metricsAuthorized(r) {
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		// version=0.0.4 is the Prometheus text-format contract scrapers key off.

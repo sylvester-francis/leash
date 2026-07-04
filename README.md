@@ -369,6 +369,8 @@ disables that boundary. Full reference: [`docs/cli-reference.md`](docs/cli-refer
 --admin         admin listener: healthz, readyz, metrics  (serve only, default off)
 --require-run-id  refuse requests with no X-Loop-Id        (serve only, default off)
 --standby       wait for the lease; active/passive HA      (serve only, default off)
+--auth-token    require a matching X-Leash-Token header    (serve only, default off)
+--max-runs      cap concurrently-tracked runs (503 over)   (serve only, default 0)
 ```
 
 Every shared flag also reads a `LEASH_`-prefixed environment variable

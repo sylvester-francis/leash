@@ -23,6 +23,8 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +56,10 @@ var ErrGovernorHeld = errors.New("proxy: another governor already holds this led
 // defaultRunID is used when a request carries no X-Loop-Id and no wrapper
 // default was configured.
 const defaultRunID = "default"
+
+// authHeader carries the shared-secret credential when Config.AuthToken is set.
+// It is leash-internal and never forwarded upstream.
+const authHeader = "X-Leash-Token"
 
 // defaultMaxBodyBytes caps a request body at 10 MiB when Config.MaxBodyBytes is
 // unset. It guards the request read only; responses are never capped.
@@ -94,6 +100,15 @@ type Config struct {
 	// RequireRunID refuses untagged requests with 400 instead of pooling them
 	// into the default run.
 	RequireRunID bool
+	// AuthTokens, when non-empty, requires every request to present an
+	// X-Leash-Token header matching one of them; an empty slice disables
+	// authentication. Configuring more than one allows zero-downtime rotation:
+	// accept the old and new token during an overlap, roll clients over, then
+	// drop the old one.
+	AuthTokens []string
+	// MaxRuns caps the number of runs the proxy will track in memory at once;
+	// zero is unlimited. A request for a new run beyond the cap is refused 503.
+	MaxRuns int
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Logger receives redacted structured logs; nil discards them. Header values
@@ -114,6 +129,11 @@ type Proxy struct {
 	mu          sync.Mutex
 	runs        map[string]*runState
 	warnedBlind map[string]bool
+
+	// authDigests holds the SHA-256 of each configured token; authOn gates their
+	// use. Hashing both sides gives a constant-length, constant-time comparison.
+	authDigests [][32]byte
+	authOn      bool
 
 	// stopSweep stops the idle-run eviction goroutine on Shutdown.
 	stopSweep chan struct{}
@@ -165,6 +185,12 @@ func New(cfg Config) (*Proxy, error) {
 		warnedBlind: make(map[string]bool),
 		stopSweep:   make(chan struct{}),
 	}
+	for _, tok := range cfg.AuthTokens {
+		if tok != "" {
+			p.authDigests = append(p.authDigests, sha256.Sum256([]byte(tok)))
+		}
+	}
+	p.authOn = len(p.authDigests) > 0
 	lease, acquired, err := cfg.Ledger.Acquire(context.Background(), governanceLeaseKey)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: acquire governance lease: %w", err)
@@ -204,6 +230,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // serve governs one request without the panic guard.
 func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
+	if !p.authorized(r) {
+		p.writeGatewayError(w, http.StatusUnauthorized, "missing or invalid credential")
+		return
+	}
 	ctx := r.Context()
 	runID, ok := p.resolveRunID(w, r)
 	if !ok {
@@ -211,7 +241,12 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := meter.DetectProvider(r.URL.Path, r.Header)
 
-	rs := p.runStateFor(runID)
+	rs, ok := p.runStateFor(runID)
+	if !ok {
+		p.writeGatewayError(w, http.StatusServiceUnavailable, "run capacity reached; the governor is at its --max-runs limit")
+		p.cfg.Observer.CallRefused(provider, "capacity")
+		return
+	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
@@ -390,16 +425,37 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	p.cfg.Observer.CallForwarded(provider, result.Usage, blind)
 }
 
-// runStateFor returns the per-run serializer, creating it on first touch.
-func (p *Proxy) runStateFor(runID string) *runState {
+// authorized reports whether a request carries a valid credential. It compares
+// the SHA-256 of the presented token against every configured token in constant
+// time, without early return, so timing reveals neither which token matched nor
+// how many are configured. It always returns true when authentication is off.
+func (p *Proxy) authorized(r *http.Request) bool {
+	if !p.authOn {
+		return true
+	}
+	got := sha256.Sum256([]byte(r.Header.Get(authHeader)))
+	match := 0
+	for i := range p.authDigests {
+		match |= subtle.ConstantTimeCompare(got[:], p.authDigests[i][:])
+	}
+	return match == 1
+}
+
+// runStateFor returns the per-run serializer, creating it on first touch. ok is
+// false when a new run would exceed MaxRuns; an already-tracked run is always
+// returned so its durable answer (a stop, a kill) is never shed.
+func (p *Proxy) runStateFor(runID string) (*runState, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	rs, ok := p.runs[runID]
-	if !ok {
-		rs = &runState{}
-		p.runs[runID] = rs
+	if rs, ok := p.runs[runID]; ok {
+		return rs, true
 	}
-	return rs
+	if p.cfg.MaxRuns > 0 && len(p.runs) >= p.cfg.MaxRuns {
+		return nil, false
+	}
+	rs := &runState{}
+	p.runs[runID] = rs
+	return rs, true
 }
 
 // Eviction bounds the per-run memory a long-lived serve holds.

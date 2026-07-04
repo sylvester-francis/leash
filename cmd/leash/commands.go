@@ -205,13 +205,19 @@ func cmdServe(args []string) int {
 		"address for the admin listener serving /healthz, /readyz, /metrics (empty disables)")
 	standby := fs.Bool("standby", envBool("LEASH_STANDBY", false),
 		"wait for the governance lease instead of erroring when another instance holds it (active/passive HA)")
+	authToken := fs.String("auth-token", envStr("LEASH_AUTH_TOKEN", ""),
+		"require an X-Leash-Token header matching this value; space-separate two to rotate with no downtime (prefer LEASH_AUTH_TOKEN so it stays out of the process list; empty disables)")
+	maxRuns := fs.Int("max-runs", envInt("LEASH_MAX_RUNS", 0),
+		"cap on runs tracked in memory at once; a new run beyond it is refused 503 (0 disables)")
 	setUsage(fs, "leash serve - run the standalone governor gateway (Tier 2).",
 		"leash serve [flags]",
 		"leash serve --listen :8088 --max-cost 20 --prices prices.json",
-		"leash serve --admin :9090 --require-run-id --db postgres://user:pass@host/leash --standby")
+		"LEASH_AUTH_TOKEN=$(cat token) leash serve --require-run-id --max-runs 1000 --admin :9090")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
+
+	authTokens := strings.Fields(*authToken)
 
 	g, limits, prices, err := buildGovernor(c)
 	if err != nil {
@@ -265,6 +271,8 @@ func cmdServe(args []string) int {
 		MaxBodyBytes:          c.maxBodyBytes,
 		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
 		RequireRunID:          *requireRunID,
+		AuthTokens:            authTokens,
+		MaxRuns:               *maxRuns,
 		Logger:                logger,
 		Observer:              observers,
 	}, *standby, standbyRetryInterval, logger)
@@ -282,7 +290,7 @@ func cmdServe(args []string) int {
 	// it never collides with proxied API paths and can be network-segmented.
 	var adminSrv *http.Server
 	if *admin != "" {
-		adminSrv = proxy.NewAdminServer(*admin, l, p, metrics)
+		adminSrv = proxy.NewAdminServer(*admin, l, p, metrics, authTokens)
 		go func() {
 			if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Error("admin server error", "err", err)
@@ -301,7 +309,7 @@ func cmdServe(args []string) int {
 		}
 	}()
 
-	logger.Info("serving", "version", version, "addr", *listen, "db", c.db)
+	logger.Info("serving", "version", version, "addr", *listen, "db", c.db, "auth", len(authTokens) > 0)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server error", "err", err)
 		return 1
