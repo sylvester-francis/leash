@@ -7,6 +7,8 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-04
+
 Following an adversarial architecture review, this release closes the
 metering-integrity gaps. It is the first release to change default behavior.
 
@@ -147,6 +149,7 @@ Production hardening and release engineering.
   stream teeing, the wrapper, the standalone gateway, and the `ps`, `inspect`,
   and `kill` commands.
 
-[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sylvester-francis/leash/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sylvester-francis/leash/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sylvester-francis/leash/releases/tag/v0.1.0
