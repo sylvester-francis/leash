@@ -7,6 +7,14 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Changed
+- Updated the `rerun` dependency to v0.2.0 ("correct under failure") and adopted
+  its typed error sentinels: `EnsureRun` and the append retry now match
+  `rerun.ErrRunExists` / `rerun.ErrSeqConflict` with `errors.Is`, replacing a
+  fragile SQLite error-string heuristic (so a resume no longer depends on the
+  wording of a driver error). Existing ledger databases are migrated in place by
+  rerun's versioned schema migrations on first open.
+
 ## [0.2.1] - 2026-07-04
 
 ### Added

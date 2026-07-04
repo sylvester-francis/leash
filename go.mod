@@ -2,7 +2,7 @@ module github.com/sylvester-francis/leash
 
 go 1.25.0
 
-require github.com/sylvester-francis/rerun v0.1.1
+require github.com/sylvester-francis/rerun v0.2.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
