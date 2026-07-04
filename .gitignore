@@ -1,5 +1,6 @@
 # Compiled binary and build artifacts.
 /leash
+/fakeupstream
 /doccheck
 /cmd/leash/leash
 *.test
