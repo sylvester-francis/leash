@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -233,6 +234,10 @@ func cmdServe(args []string) int {
 		"cap on runs tracked in memory at once; a new run beyond it is refused 503 (0 disables)")
 	insecure := fs.Bool("insecure", envBool("LEASH_INSECURE", false),
 		"allow the gateway to run with no --auth-token (forwarding live API keys unauthenticated)")
+	authTokenFile := fs.String("auth-token-file", envStr("LEASH_AUTH_TOKEN_FILE", ""),
+		"read auth token(s) from this file (whitespace-separated) instead of a flag or env, keeping them off the process list")
+	maxConns := fs.Int("max-conns", envInt("LEASH_MAX_CONNS", 0),
+		"cap on simultaneous client connections; beyond it new connections wait (0 disables)")
 	setUsage(fs, "leash serve - run the standalone governor gateway (Tier 2).",
 		"leash serve [flags]",
 		"leash serve --listen :8088 --max-cost 20 --prices prices.json",
@@ -242,6 +247,14 @@ func cmdServe(args []string) int {
 	}
 
 	authTokens := strings.Fields(*authToken)
+	if *authTokenFile != "" {
+		data, ferr := os.ReadFile(*authTokenFile)
+		if ferr != nil {
+			fmt.Fprintf(os.Stderr, "leash: read --auth-token-file: %v\n", ferr)
+			return 1
+		}
+		authTokens = append(authTokens, strings.Fields(string(data))...)
+	}
 	if len(authTokens) == 0 && !*insecure {
 		fmt.Fprintln(os.Stderr, "leash: serve requires --auth-token (or LEASH_AUTH_TOKEN); pass --insecure to run open and forward API keys unauthenticated")
 		return 2
@@ -276,6 +289,9 @@ func cmdServe(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 2
+	}
+	if upstream != nil && upstream.Scheme == "http" {
+		logger.Warn("upstream is plain http; the client credential is forwarded in cleartext", "upstream", upstream.Redacted())
 	}
 
 	// The stop line is printed straight to stderr (not through the structured
@@ -351,8 +367,18 @@ func cmdServe(args []string) int {
 		}
 	}()
 
-	logger.Info("serving", "version", version, "addr", *listen, "db", c.db, "auth", len(authTokens) > 0)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		logger.Error("listen failed", "addr", *listen, "err", err)
+		return 1
+	}
+	if *maxConns > 0 {
+		ln = proxy.LimitListener(ln, *maxConns)
+	}
+
+	logger.Info("serving", "version", version, "addr", *listen, "db", c.db,
+		"auth", len(authTokens) > 0, "max_conns", *maxConns)
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		logger.Error("server error", "err", err)
 		return 1
 	}

@@ -56,6 +56,12 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
+- `--max-conns` caps simultaneous client connections, so a flood of slow or idle
+  clients cannot exhaust file descriptors or goroutines.
+- `--auth-token-file` reads auth token(s) from a file, keeping them off the
+  process list and out of the environment.
+- `serve` now warns when `--upstream` is plain `http` (the client credential
+  would be forwarded in cleartext).
 - Prompt-cache pricing. Price tables accept `cached_input` and `cache_write`
   rates, and leash reads cached-token counts from both providers (OpenAI's
   `prompt_tokens_details.cached_tokens`; Anthropic's `cache_read_input_tokens` /
