@@ -67,6 +67,16 @@ into a 500 rather than taking the gateway down.
 - Network eavesdropping between the agent and the proxy. leash does not terminate
   TLS in v0.1; terminate it at your ingress.
 
+## Supply chain
+
+leash has one direct dependency (rerun) and a small indirect closure (a pure-Go
+SQLite driver, a pure-Go Postgres driver, and their support libraries); there is
+no C toolchain and no provider SDK. A nightly `govulncheck` run scans the code
+and that closure for known vulnerabilities, and CI builds with `check-latest`
+so a patched Go toolchain is picked up automatically. Release binaries are
+CGO-free static builds with reproducible `-trimpath` flags, published with a
+`checksums.txt`.
+
 ## Hardening checklist
 
 - Set `--require-run-id` on a shared gateway.
