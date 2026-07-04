@@ -433,8 +433,9 @@
           <div class="tag">2 - Serve</div>
           <h3 style="margin-top:12px">Run it as a gateway</h3>
           <p style="margin-bottom:14px">A standalone proxy for any language, CI, or a shared team endpoint. Point
-            a client's <span class="mono">base_url</span> at leash and tag each run with a header.</p>
-          <div class="step-cmd mono"><span class="p">$</span> leash serve --listen :8088 --max-cost 20</div>
+            a client's <span class="mono">base_url</span> at leash and tag each run with a header. Auth is on by
+            default, and each run is scoped to its credential.</p>
+          <div class="step-cmd mono"><span class="p">$</span> export LEASH_AUTH_TOKEN=$(leash gen-token)<br><span class="p">$</span> leash serve --listen :8088 --max-cost 20</div>
         </div>
         <div class="card">
           <div class="tag">3 - Inspect &amp; control</div>
@@ -509,12 +510,14 @@ leash: <span class="stop">stopped</span> run a3f9 after 18 calls,
             <h3>Shared gateway, per-run budgets</h3>
             <p>One proxy in front of many agents. Each run carries its own <span class="mono">X-Loop-Id</span> and its own budget.</p>
           </div>
-          <pre><span class="p">$</span> leash serve --listen :8088 --max-cost 20 \
+          <pre><span class="p">$</span> export LEASH_AUTH_TOKEN=$(leash gen-token)
+<span class="p">$</span> leash serve --listen :8088 --max-cost 20 \
       --prices prices.json --require-run-id
 
 <span class="c"># the client, any language:</span>
 <span class="p">$</span> curl http://localhost:8088/v1/chat/completions \
     -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -H "X-Leash-Token: $LEASH_AUTH_TOKEN" \
     -H "X-Loop-Id: nightly-batch-7" \
     -d '{"model":"gpt-4o", ...}'</pre>
           <div class="whats"><span class="arw">-&gt;</span><span>Different <b>X-Loop-Id</b> values get independent budgets, stops, and kills.</span></div>
@@ -622,8 +625,9 @@ api-eval-3       6      1.20    running
         <h2>Three ways to install.</h2>
         <p class="lead" style="margin-top:14px">A single static binary. Grab a release, use the Go toolchain, or build from a checkout.</p>
         <p class="honest">Prices are yours to supply with <span class="mono">--prices</span>; leash ships none and never
-          estimates. Without a price table the cost meter is blind, and leash says so, once and loudly - lean on
-          calls, deadline, rate, and kill.</p>
+          estimates. With a cost budget and no prices the meter is blind, so leash fails closed by default -
+          refusing what it can't price (set <span class="mono">--on-blind=warn</span> to only warn and lean on
+          calls, deadline, rate, and kill).</p>
       </div>
       <div class="steps">
         <div class="step-cmd"><span class="c"># prebuilt binary (linux / mac / windows)</span><br>github.com/sylvester-francis/leash/releases</div>
