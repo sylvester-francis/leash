@@ -145,8 +145,10 @@ func (l *Ledger) Acquire(ctx context.Context, runID string) (*Lease, bool, error
 }
 
 // EnsureRun creates the run if it is new. Resuming an existing run is not an
-// error: because Create fails only on a healthy database when the run already
-// exists, a Create failure paired with a working read is treated as a resume.
+// error: a duplicate-key Create failure paired with a working read is a resume.
+// Any other Create failure (a real write error, e.g. a full disk) is returned,
+// so a partial database failure fails closed rather than being mistaken for a
+// resume.
 func (l *Ledger) EnsureRun(ctx context.Context, runID string, at time.Time) error {
 	err := l.store.Create(ctx, rerun.Run{
 		ID:       runID,
@@ -157,10 +159,12 @@ func (l *Ledger) EnsureRun(ctx context.Context, runID string, at time.Time) erro
 	if err == nil {
 		return nil
 	}
-	// The run may already exist (a resume). Probe with a read: if the database
-	// is healthy enough to list the journal, the Create failure was a duplicate.
-	if _, loadErr := l.store.LoadLogs(ctx, runID); loadErr == nil {
-		return nil
+	// A duplicate run id (a resume) is a unique-constraint violation. Only treat
+	// the failure as a resume when it is that and the journal is readable.
+	if isSequenceConflict(err) {
+		if _, loadErr := l.store.LoadLogs(ctx, runID); loadErr == nil {
+			return nil
+		}
 	}
 	return fmt.Errorf("create run %s: %w", runID, err)
 }
@@ -251,15 +255,18 @@ func (l *Ledger) Finish(ctx context.Context, runID string, ok bool) error {
 	return nil
 }
 
-// pingProbeRun is a sentinel run id whose empty journal the readiness probe
-// loads to touch the store without listing real runs.
+// pingProbeRun is a sentinel run id the write probe targets.
 const pingProbeRun = "__leash_readyz_probe__"
 
-// Ping does a cheap durable read to confirm the ledger is reachable, backing the
-// admin /readyz check.
+// Ping confirms the ledger is WRITABLE, backing the admin /readyz check and the
+// proxy's fail-closed recovery. It must exercise a write, not just a read: on a
+// full or read-only-remounted disk, reads still succeed while every governed
+// append fails, so a read probe would report healthy while governance is broken.
+// Finish on a sentinel run is a harmless idempotent write (it updates zero rows
+// when the run does not exist) that fails when the store cannot write.
 func (l *Ledger) Ping(ctx context.Context) error {
-	if _, err := l.store.LoadLogs(ctx, pingProbeRun); err != nil {
-		return fmt.Errorf("ledger ping: %w", err)
+	if err := l.store.Finish(ctx, pingProbeRun, rerun.Done); err != nil {
+		return fmt.Errorf("ledger write probe: %w", err)
 	}
 	return nil
 }
