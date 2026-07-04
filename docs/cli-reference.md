@@ -70,6 +70,8 @@ header gets 400.
 | `--standby` | bool | `false` | wait for the governance lease instead of erroring when another instance holds it (active/passive HA) |
 | `--auth-token` | string | required | require a matching `X-Leash-Token` header; space-separate two for zero-downtime rotation; prefer `LEASH_AUTH_TOKEN` |
 | `--insecure` | bool | `false` | allow serving with no `--auth-token` (forwards live API keys unauthenticated) |
+| `--auth-token-file` | path | none | read auth token(s) from a file (whitespace-separated), keeping them off the process list |
+| `--max-conns` | int | `0` | cap on simultaneous client connections; beyond it new connections wait (0 disables) |
 | `--max-runs` | int | `0` | cap on runs tracked in memory at once; a new run beyond it is refused 503 (0 disables) |
 
 `serve` refuses to start without `--auth-token` (or `LEASH_AUTH_TOKEN`) unless
