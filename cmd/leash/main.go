@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -63,6 +64,8 @@ func dispatch(args []string) int {
 		return cmdVersion()
 	case "gen-token":
 		return cmdGenToken()
+	case "healthcheck":
+		return cmdHealthcheck(args[1:])
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 		return 0
@@ -89,6 +92,34 @@ func cmdGenToken() int {
 	}
 	fmt.Println(hex.EncodeToString(b[:]))
 	return 0
+}
+
+// cmdHealthcheck probes a URL and exits 0 on a 2xx, 1 otherwise. It gives a
+// distroless image - which has no shell or curl - a usable HEALTHCHECK against
+// the admin listener's /healthz.
+func cmdHealthcheck(args []string) int {
+	fs := flag.NewFlagSet("leash healthcheck", flag.ContinueOnError)
+	url := fs.String("url", envStr("LEASH_HEALTHCHECK_URL", "http://127.0.0.1:9090/healthz"),
+		"URL to probe (typically the admin listener's /healthz)")
+	timeout := fs.Duration("timeout", 2*time.Second, "probe timeout")
+	setUsage(fs, "leash healthcheck - probe a health URL for container HEALTHCHECK.",
+		"leash healthcheck [--url URL]",
+		"leash healthcheck --url http://127.0.0.1:9090/healthz")
+	if err := fs.Parse(args); err != nil {
+		return flagExit(err)
+	}
+	client := &http.Client{Timeout: *timeout}
+	resp, err := client.Get(*url)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leash: healthcheck %s: %v\n", *url, err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "leash: healthcheck %s: status %d\n", *url, resp.StatusCode)
+	return 1
 }
 
 // usage prints the top-level help.

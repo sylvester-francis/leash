@@ -14,7 +14,11 @@
 
 package main
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestRunFlagRejectsInvalidRunID(t *testing.T) {
 	// An invalid --run must fail fast with exit 1, before any ledger work.
@@ -33,5 +37,23 @@ func TestRunFlagAcceptsValidRunIDShape(t *testing.T) {
 	code := cmdRun([]string{"--run", "good.run_1-2"})
 	if code != 2 {
 		t.Fatalf("cmdRun with valid --run and no command exited %d, want 2 (past run-id validation)", code)
+	}
+}
+
+func TestCmdHealthcheck(t *testing.T) {
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ok.Close()
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer bad.Close()
+
+	if code := cmdHealthcheck([]string{"--url", ok.URL}); code != 0 {
+		t.Fatalf("healthcheck of a 200 = %d, want 0", code)
+	}
+	if code := cmdHealthcheck([]string{"--url", bad.URL}); code != 1 {
+		t.Fatalf("healthcheck of a 503 = %d, want 1", code)
 	}
 }

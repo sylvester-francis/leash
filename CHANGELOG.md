@@ -56,6 +56,11 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
+- `leash healthcheck` subcommand and a Dockerfile `HEALTHCHECK`, so the
+  distroless image (no shell or curl) is health-checkable against the admin
+  `/healthz`. The default image `CMD` enables the admin listener; the k8s and
+  compose examples add `fsGroup`/`runAsNonRoot`, resource limits, and drain
+  timing. The docker-publish workflow no longer moves `:latest` for prereleases.
 - `--shutdown-timeout` (default 30s, was a hard-coded 5s) bounds how long
   graceful shutdown waits for in-flight streams, so long model streams are not
   severed on deploy. `--drain-delay` fails `/readyz` and pauses before draining

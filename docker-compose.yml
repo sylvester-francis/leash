@@ -19,12 +19,15 @@ services:
   leash:
     build:
       context: .
+    # --insecure: this is a trusted local demo with no auth. A real deployment
+    # sets LEASH_AUTH_TOKEN instead.
     command:
       - "serve"
       - "--listen"
       - "0.0.0.0:8088"
       - "--admin"
       - "0.0.0.0:9090"
+      - "--insecure"
       - "--upstream"
       - "http://fakeupstream:9099"
       - "--db"
@@ -40,6 +43,15 @@ services:
       - leash-data:/data
     depends_on:
       - fakeupstream
+    restart: unless-stopped
+    stop_grace_period: 35s
+    mem_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "/leash", "healthcheck", "--url", "http://127.0.0.1:9090/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
 
 volumes:
   leash-data:

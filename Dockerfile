@@ -14,6 +14,11 @@ FROM gcr.io/distroless/static:nonroot
 COPY --from=build /leash /leash
 COPY --from=build --chown=65532:65532 /out/data /data
 VOLUME ["/data"]
-EXPOSE 8088
+EXPOSE 8088 9090
+# serve requires an auth token: run with -e LEASH_AUTH_TOKEN=... (or add
+# --insecure for a trusted local socket). The admin listener backs the
+# healthcheck below; /healthz needs no credential.
 ENTRYPOINT ["/leash"]
-CMD ["serve", "--listen", ":8088", "--db", "/data/leash.db"]
+CMD ["serve", "--listen", ":8088", "--admin", ":9090", "--db", "/data/leash.db"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+  CMD ["/leash", "healthcheck", "--url", "http://127.0.0.1:9090/healthz"]
