@@ -26,6 +26,7 @@ package ledger
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -188,9 +189,11 @@ func (l *Ledger) EnsureRun(ctx context.Context, runID string, at time.Time) erro
 	if err == nil {
 		return nil
 	}
-	// A duplicate run id (a resume) is a unique-constraint violation. Only treat
-	// the failure as a resume when it is that and the journal is readable.
-	if isSequenceConflict(err) {
+	// A duplicate run id (a resume) surfaces as rerun.ErrRunExists. Only treat the
+	// failure as a resume when it is that and the journal is readable; any other
+	// Create error (a real write failure, e.g. a full disk) is returned so it
+	// fails closed rather than being mistaken for a resume.
+	if errors.Is(err, rerun.ErrRunExists) {
 		if _, loadErr := l.store.LoadLogs(ctx, runID); loadErr == nil {
 			return nil
 		}
@@ -437,7 +440,7 @@ func (l *Ledger) appendAt(ctx context.Context, runID, tag string, payload []byte
 		if err == nil {
 			return hintSeq, nil
 		}
-		if !isSequenceConflict(err) {
+		if !errors.Is(err, rerun.ErrSeqConflict) {
 			return 0, fmt.Errorf("append %s to run %s: %w", tag, runID, err)
 		}
 		// The hint was taken by a concurrent writer; fall back to a re-read.
@@ -456,7 +459,7 @@ func (l *Ledger) appendAt(ctx context.Context, runID, tag string, payload []byte
 		if err == nil {
 			return seq, nil
 		}
-		if isSequenceConflict(err) {
+		if errors.Is(err, rerun.ErrSeqConflict) {
 			lastErr = err
 			continue
 		}
@@ -464,14 +467,4 @@ func (l *Ledger) appendAt(ctx context.Context, runID, tag string, payload []byte
 	}
 	return 0, fmt.Errorf("append %s to run %s: exhausted %d attempts racing for a journal position: %w",
 		tag, runID, appendRetries, lastErr)
-}
-
-// isSequenceConflict reports whether err is a journal primary-key collision,
-// which means a concurrent writer claimed the same sequence number.
-func isSequenceConflict(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "constraint") || strings.Contains(msg, "unique")
 }
