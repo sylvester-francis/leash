@@ -132,6 +132,10 @@ type Config struct {
 	// OnBlind decides how leash handles a call it cannot meter while a cost
 	// budget is active. The zero value (BlindRefuse) fails closed.
 	OnBlind BlindPolicy
+	// MaxCostPerCall caps a single call's token cost; zero disables it. A call
+	// over the cap stops the run so a runaway large call cannot repeat. Because
+	// metering is post-response, the overshooting call itself still happens.
+	MaxCostPerCall float64
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Logger receives redacted structured logs; nil discards them. Header values
@@ -488,22 +492,34 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 
 	blind := !result.HasUsage
+	callCost := policy.TokenCost(result.Usage, p.cfg.Governor.Prices)
 	switch {
+	case p.cfg.MaxCostPerCall > 0 && callCost > p.cfg.MaxCostPerCall && state.StopReason == "":
+		// A single call exceeded the per-call cap. The call already happened;
+		// stop the run so it cannot repeat.
+		p.stopRun(recCtx, rs, runID, state, "max_cost_per_call", at)
 	case blind && p.blindRefuses() && state.StopReason == "":
 		// Fail closed: a forwarded call under a cost budget came back unmeterable.
 		// The response already reached the client, so stop the run to bound the
 		// damage - no further spend goes uncounted.
-		state.StopReason = blindStopReason
-		rs.stopped.Store(true)
-		if err := p.cfg.Ledger.AppendStop(recCtx, runID, state, at); err != nil {
-			p.cfg.Logger.Error("record blind stop failed", "run", runID, "err", err)
-		}
-		p.cfg.Observer.RunStopped(state)
-		p.cfg.Logger.Warn("run stopped: a forwarded call could not be metered under a cost budget", "run", runID)
+		p.stopRun(recCtx, rs, runID, state, blindStopReason, at)
 	case blind && p.cfg.OnBlind != BlindAllow:
 		p.warnBlind(runID)
 	}
 	p.cfg.Observer.CallForwarded(provider, result.Usage, blind)
+}
+
+// stopRun records a post-forward stop (a blind or per-call-cost stop) with the
+// given reason and notifies observers.
+func (p *Proxy) stopRun(ctx context.Context, rs *runState, runID string, state *policy.State, reason string, at time.Time) {
+	state.StopReason = reason
+	rs.stopped.Store(true)
+	if err := p.cfg.Ledger.AppendStop(ctx, runID, state, at); err != nil {
+		p.cfg.Logger.Error("record stop failed", "run", runID, "err", err)
+		p.cfg.Observer.LedgerError()
+	}
+	p.cfg.Observer.RunStopped(state)
+	p.cfg.Logger.Warn("run stopped", "run", runID, "reason", reason, "calls", state.Calls)
 }
 
 // authorized reports whether a request carries a valid credential. It compares

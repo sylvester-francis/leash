@@ -118,12 +118,13 @@ func TestRefreshZeroStartIsZeroElapsed(t *testing.T) {
 	}
 }
 
-func TestFoldSampleIncludesReasoning(t *testing.T) {
+func TestFoldSampleTokens(t *testing.T) {
 	s := &State{}
-	s.Fold(Usage{Model: "gpt-4", InputTokens: 10, OutputTokens: 20, ReasoningTokens: 30}, "fp", time.Now(), nil)
-	// The rate sample must sum all three token kinds.
-	if s.Samples[0].CumulativeTokens != 60 {
-		t.Fatalf("sample cumulative = %d, want 60 (input+output+reasoning)", s.Samples[0].CumulativeTokens)
+	// Reasoning (5) is a subset of output (20), so the rate sample is input +
+	// output, not input + output + reasoning.
+	s.Fold(Usage{Model: "gpt-4", InputTokens: 10, OutputTokens: 20, ReasoningTokens: 5}, "fp", time.Now(), nil)
+	if s.Samples[0].CumulativeTokens != 30 {
+		t.Fatalf("sample cumulative = %d, want 30 (input+output; reasoning is within output)", s.Samples[0].CumulativeTokens)
 	}
 }
 
