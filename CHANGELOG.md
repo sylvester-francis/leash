@@ -25,6 +25,10 @@ metering-integrity gaps. It is the first release to change default behavior.
   An unrecognized endpoint is rejected with 402; a known-provider call that
   returns unreadable usage stops the run (reason `meter_blind`). Restore the old
   behavior with `--on-blind=warn` (or `allow`). Set via `LEASH_ON_BLIND`.
+- **The rate limit is now transient backpressure, not a terminal stop.** A
+  rate-limited call is refused with a `Retry-After` header and the run keeps
+  running, resuming once the trailing window decays - where before it stopped the
+  run for good. Every other boundary still stops the run permanently.
 
 ### Fixed
 - The blind-meter warning now goes through the structured logger, so it no longer
@@ -62,6 +66,11 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
+- Soft limits and alerting. `--warn-at` (default 0.8) fires a one-time warning
+  per run when a budget (cost, calls, deadline) crosses a fraction of its ceiling
+  - a structured log, a `leash_budget_warnings_total{reason}` metric, and an
+  observer event - so you can act before the hard stop. `serve --webhook URL`
+  POSTs a JSON event on approach and on stop (best-effort, off the request path).
 - `leash healthcheck` subcommand and a Dockerfile `HEALTHCHECK`, so the
   distroless image (no shell or curl) is health-checkable against the admin
   `/healthz`. The default image `CMD` enables the admin listener; the k8s and

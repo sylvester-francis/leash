@@ -162,6 +162,7 @@ type commonFlags struct {
 	logFormat             string
 	onBlind               string
 	maxCostPerCall        float64
+	warnAt                float64
 }
 
 // registerCommon binds the shared flags with their documented defaults.
@@ -169,6 +170,7 @@ func registerCommon(fs *flag.FlagSet) *commonFlags {
 	c := &commonFlags{}
 	fs.Float64Var(&c.maxCost, "max-cost", envFloat("LEASH_MAX_COST", 5.00), "dollar budget over token + compute cost (0 disables)")
 	fs.Float64Var(&c.maxCostPerCall, "max-cost-per-call", envFloat("LEASH_MAX_COST_PER_CALL", 0), "dollar cap on a single call's token cost; over it stops the run (0 disables)")
+	fs.Float64Var(&c.warnAt, "warn-at", envFloat("LEASH_WARN_AT", 0.8), "warn once per run when a budget (cost, calls, deadline) reaches this fraction; 0 disables")
 	fs.Int64Var(&c.maxCalls, "max-calls", envInt64("LEASH_MAX_CALLS", 100), "maximum governed calls (0 disables)")
 	fs.DurationVar(&c.deadline, "deadline", envDuration("LEASH_DEADLINE", 30*time.Minute), "wall-clock budget from the first call (0 disables)")
 	fs.StringVar(&c.rate, "rate", envStr("LEASH_RATE", ""), "trailing token rate as tokens/window, e.g. 100000/1m (empty disables)")

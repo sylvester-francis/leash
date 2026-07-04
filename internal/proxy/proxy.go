@@ -35,6 +35,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -137,6 +138,10 @@ type Config struct {
 	// over the cap stops the run so a runaway large call cannot repeat. Because
 	// metering is post-response, the overshooting call itself still happens.
 	MaxCostPerCall float64
+	// WarnAt fires a one-time BudgetWarning per run per budget when utilization
+	// reaches this fraction (e.g. 0.8 for 80%). Zero disables warnings. It is a
+	// soft signal only; enforcement is unchanged.
+	WarnAt float64
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Logger receives redacted structured logs; nil discards them. Header values
@@ -183,6 +188,9 @@ type runState struct {
 	// appendFailed is set when a durable write for this run failed; the next call
 	// is refused (fail closed) until a write probe succeeds.
 	appendFailed atomic.Bool
+	// warned records which budgets have already fired a warning for this run, so
+	// each fires at most once. Guarded by the run's mu.
+	warned map[string]bool
 }
 
 // New builds a Proxy and claims the ledger's governance lease. It returns an
@@ -311,6 +319,17 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if reason, tripped := p.cfg.Governor.Evaluate(state, now); tripped {
+		// The rate limit is backpressure, not a terminal stop: refuse this call
+		// with a Retry-After and leave the run running, so it resumes once the
+		// trailing window decays. Every other boundary stops the run for good.
+		if reason == policy.ReasonRateLimit {
+			if secs := int(p.cfg.Governor.RateWindow().Seconds()); secs > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(secs))
+			}
+			p.cfg.Observer.CallRefused(provider, reason)
+			writeBoundaryStatus(w, state, reason, http.StatusTooManyRequests)
+			return
+		}
 		state.StopReason = reason
 		rs.stopped.Store(true)
 		if err := p.cfg.Ledger.AppendStop(ctx, runID, state, now); err != nil {
@@ -510,7 +529,31 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	case blind && p.cfg.OnBlind != BlindAllow:
 		p.warnBlind(runID)
 	}
+	if state.StopReason == "" {
+		p.maybeWarn(rs, state)
+	}
 	p.cfg.Observer.CallForwarded(provider, result.Usage, blind)
+}
+
+// maybeWarn fires a one-time BudgetWarning per run per budget once utilization
+// crosses Config.WarnAt. It is a soft signal - it never stops the run. The
+// caller holds the run's mu, so rs.warned needs no further locking.
+func (p *Proxy) maybeWarn(rs *runState, state *policy.State) {
+	if p.cfg.WarnAt <= 0 {
+		return
+	}
+	for _, st := range p.cfg.Governor.BudgetStatuses(state) {
+		if st.Fraction < p.cfg.WarnAt || rs.warned[st.Reason] {
+			continue
+		}
+		if rs.warned == nil {
+			rs.warned = map[string]bool{}
+		}
+		rs.warned[st.Reason] = true
+		p.cfg.Observer.BudgetWarning(state, st)
+		p.cfg.Logger.Warn("run approaching budget", "run", state.RunID, "budget", st.Reason,
+			"used", st.Used, "limit", st.Limit, "fraction", st.Fraction)
+	}
 }
 
 // stopRun records a post-forward stop (a blind or per-call-cost stop) with the
@@ -718,9 +761,16 @@ type boundaryBody struct {
 
 // writeBoundary writes the machine-readable 429 for a stopped run.
 func writeBoundary(w http.ResponseWriter, s *policy.State) {
+	writeBoundaryStatus(w, s, s.StopReason, http.StatusTooManyRequests)
+}
+
+// writeBoundaryStatus writes the boundary body with an explicit reason and
+// status. It backs the transient rate-limit refusal, where the run is not
+// stopped (State.StopReason is empty) but the call is still refused.
+func writeBoundaryStatus(w http.ResponseWriter, s *policy.State, reason string, status int) {
 	var b boundaryBody
 	b.Error.Type = "leash_boundary"
-	b.Error.Reason = s.StopReason
+	b.Error.Reason = reason
 	b.Error.Run = s.RunID
 	b.Error.Calls = s.Calls
 	b.Error.TokenCost = round2(s.TokenCost)
@@ -728,7 +778,7 @@ func writeBoundary(w http.ResponseWriter, s *policy.State) {
 	b.Error.TotalCost = round2(s.TotalCost)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusTooManyRequests)
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(b)
 }
 

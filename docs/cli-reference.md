@@ -34,6 +34,7 @@ the kill switch is always active.
 |---|---|---|---|
 | `--max-cost` | dollars | `5.00` | budget over token + compute cost; `0` disables |
 | `--max-cost-per-call` | dollars | off | cap on a single call's token cost; over it stops the run; `0` disables |
+| `--warn-at` | fraction | `0.8` | warn once per run when a budget (cost, calls, deadline) reaches this fraction; `0` disables |
 | `--max-calls` | int | `100` | maximum governed calls; `0` disables |
 | `--deadline` | duration | `30m` | wall-clock budget from the first call; `0` disables |
 | `--rate` | tokens/window | off | trailing token rate, e.g. `100000/1m`; empty disables |
@@ -68,6 +69,7 @@ header gets 400.
 | `--listen` | address | `:8088` | address the gateway listens on |
 | `--require-run-id` | bool | `false` | refuse a request with no `X-Loop-Id` (400) instead of pooling it into `default` |
 | `--admin` | address | off | admin listener for `/healthz`, `/readyz`, `/metrics`; empty disables |
+| `--webhook` | URL | off | POST a JSON event when a run approaches a budget (`--warn-at`) or a boundary stops it; empty disables |
 | `--standby` | bool | `false` | wait for the governance lease instead of erroring when another instance holds it (active/passive HA) |
 | `--auth-token` | string | required | require a matching `X-Leash-Token` header; space-separate two for zero-downtime rotation; prefer `LEASH_AUTH_TOKEN` |
 | `--insecure` | bool | `false` | allow serving with no `--auth-token` (forwards live API keys unauthenticated) |
@@ -165,7 +167,10 @@ A refused call returns HTTP 429 with:
 `reason` is one of `kill_switch`, `deadline`, `cost_budget`, `max_calls`,
 `rate_limit`, `stall`, `meter_blind` (a call could not be metered under a cost
 budget with `--on-blind=refuse`), or `max_cost_per_call` (a single call exceeded
-`--max-cost-per-call`). Every later call for a stopped run returns the same body.
+`--max-cost-per-call`). Every reason except `rate_limit` stops the run for good,
+so every later call returns the same body. `rate_limit` is transient: the call is
+refused with a `Retry-After` header (the window in seconds) and the run keeps
+running, resuming once the trailing window decays.
 
 ## The stop line
 
@@ -232,9 +237,24 @@ When `serve --admin ADDR` is set, a second HTTP server on `ADDR` serves:
 The metrics carry no run-id labels. Counters: `leash_calls_total{decision,
 provider}`, `leash_stops_total{reason}`, `leash_tokens_total{kind}`,
 `leash_token_cost_usd_total`, `leash_blind_calls_total`,
-`leash_upstream_errors_total`, `leash_ledger_errors_total`. Gauges:
-`leash_build_info{version}`, `leash_active_runs`. See docs/deployment.md and
-docs/operations.md.
+`leash_upstream_errors_total`, `leash_ledger_errors_total`,
+`leash_budget_warnings_total{reason}`. Gauges: `leash_build_info{version}`,
+`leash_active_runs`. See docs/deployment.md and docs/operations.md.
+
+## Webhooks
+
+With `serve --webhook URL`, leash POSTs a small JSON event when a run crosses its
+`--warn-at` threshold and when a boundary stops it. Delivery is best-effort and
+off the request path (a slow endpoint never blocks a governed call):
+
+```json
+{"event":"warning","run":"nightly-7","reason":"cost_budget",
+ "used":4.10,"limit":5.00,"fraction":0.82,"calls":18,"total_cost":4.10,
+ "at":"2026-07-04T15:08:05Z"}
+```
+
+`event` is `warning` (approaching) or `stopped` (a boundary fired); `reason` is
+the budget or boundary involved.
 
 ## Examples
 
