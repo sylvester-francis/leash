@@ -58,6 +58,11 @@ Scrape the `--admin` `/metrics` endpoint. The series worth alerting on:
   are failing (a full or read-only disk, a locked or unreachable database). leash
   fails closed - it refuses calls it cannot record - so this pairs with `/readyz`
   returning 503. Page on it.
+- `rate(leash_budget_warnings_total[5m])` by `reason`. A run crossed its
+  `--warn-at` threshold (default 80%) on a budget. This is the early-warning
+  signal: alert on it to intervene before a run hits its ceiling, rather than
+  finding out from `leash_stops_total`. For push-style alerts, point
+  `serve --webhook URL` at your incident tool and act on the `warning` event.
 - `increase(leash_stops_total{reason="..."}[...])`. Watch which boundaries fire.
   A spike in `cost_budget` or `max_calls` stops may mean a runaway agent; a spike
   in `stall` means agents repeating themselves.

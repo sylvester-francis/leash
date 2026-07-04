@@ -75,6 +75,23 @@ leash serve --max-cost 20 --prices prices.json               # --on-blind=refuse
 leash serve --max-cost 20 --prices prices.json --on-blind=warn
 ```
 
+## Get warned before the cliff
+
+Budgets are a hard stop; `--warn-at` gives you an early signal, and `--webhook`
+pushes it somewhere.
+
+```sh
+# Warn at 90% instead of the default 80%; 0 turns warnings off.
+leash serve --max-cost 50 --prices prices.json --warn-at 0.90
+
+# POST a JSON event to your incident tool on approach and on stop.
+leash serve --max-cost 50 --prices prices.json --webhook https://hooks.example.com/leash
+```
+
+Warnings also increment `leash_budget_warnings_total{reason}` for alerting. The
+rate limit is the one soft boundary: a refused call returns `Retry-After` and the
+run resumes once its window decays, so a client can back off and retry.
+
 ## Isolate tenants
 
 With auth on, a run id is scoped to the presenting token, so two callers using

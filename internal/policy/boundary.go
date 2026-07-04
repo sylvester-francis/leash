@@ -102,8 +102,12 @@ func (b RateLimit) Check(s *State, now time.Time) bool {
 	return current-baseline > b.MaxTokens
 }
 
+// ReasonRateLimit is the reason string for the rate limit. It is the one
+// transient boundary: a refusal, not a terminal stop.
+const ReasonRateLimit = "rate_limit"
+
 // Reason returns "rate_limit".
-func (b RateLimit) Reason() string { return "rate_limit" }
+func (b RateLimit) Reason() string { return ReasonRateLimit }
 
 // Stall trips when Patience consecutive responses carried the same fingerprint,
 // which is how leash notices an agent redoing identical work.
@@ -174,6 +178,17 @@ func NewGovernor(l Limits, prices PriceTable, computeRate float64) *Governor {
 	return g
 }
 
+// RateWindow returns the rate limiter's trailing window, or 0 when no rate
+// limit is active. It sizes the Retry-After hint on a rate-limited refusal.
+func (g *Governor) RateWindow() time.Duration {
+	for _, b := range g.Boundaries {
+		if rl, ok := b.(RateLimit); ok {
+			return rl.Window
+		}
+	}
+	return 0
+}
+
 // MetersCost reports whether a cost budget is active, i.e. whether the governor
 // relies on token cost to stop the run. The proxy uses this to decide whether an
 // unmeterable call is a fail-closed concern.
@@ -184,6 +199,45 @@ func (g *Governor) MetersCost() bool {
 		}
 	}
 	return false
+}
+
+// BudgetStatus is a run's utilization of one bounded budget.
+type BudgetStatus struct {
+	// Reason is the boundary reason this budget stops on (cost_budget,
+	// max_calls, deadline).
+	Reason string
+	// Used and Limit are in the budget's own unit: dollars, calls, or seconds.
+	Used  float64
+	Limit float64
+	// Fraction is Used/Limit; it can exceed 1 on the call that overshoots.
+	Fraction float64
+}
+
+// BudgetStatuses reports the run's utilization of each budget that has a fixed
+// ceiling: the cost budget, the call cap, and the deadline. Boundaries without a
+// ceiling (rate, stall, kill) are omitted. Callers should Refresh or Evaluate
+// first so the time-derived fields are current.
+func (g *Governor) BudgetStatuses(s *State) []BudgetStatus {
+	var out []BudgetStatus
+	for _, b := range g.Boundaries {
+		switch t := b.(type) {
+		case CostBudget:
+			out = append(out, budgetStatus("cost_budget", s.TotalCost, t.USD))
+		case MaxCalls:
+			out = append(out, budgetStatus("max_calls", float64(s.Calls), float64(t.N)))
+		case Deadline:
+			out = append(out, budgetStatus("deadline", s.Elapsed.Seconds(), t.D.Seconds()))
+		}
+	}
+	return out
+}
+
+func budgetStatus(reason string, used, limit float64) BudgetStatus {
+	f := 0.0
+	if limit > 0 {
+		f = used / limit
+	}
+	return BudgetStatus{Reason: reason, Used: used, Limit: limit, Fraction: f}
 }
 
 // Evaluate refreshes the state's cost and time fields, then checks every active

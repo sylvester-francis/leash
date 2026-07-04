@@ -26,6 +26,7 @@ is busy, and tears down its servers on exit.
 | `demos/05-inspect-and-kill.sh` | `leash ps`, `leash inspect`, and `leash kill` against the durable ledger. |
 | `demos/06-per-call-cap-and-blind.sh` | `--max-cost-per-call`, and fail-closed metering (`--on-blind=refuse` vs `warn`). |
 | `demos/07-admin-and-metrics.sh` | `/healthz`, `/readyz`, `leash healthcheck`, and the Prometheus `/metrics`. |
+| `demos/08-soft-limits.sh` | `--warn-at` early warning, and the rate limit as recoverable backpressure (`Retry-After`). |
 
 `demos/smoke.sh` is not a showcase - it is the same harness driven as an
 asserting end-to-end test, run by CI to catch regressions in the whole path

@@ -30,6 +30,9 @@ type Observer interface {
 	CallRefused(provider meter.Provider, reason string)
 	// RunStopped reports a run's transition to stopped.
 	RunStopped(state *policy.State)
+	// BudgetWarning reports a run crossing its warn threshold on a budget, before
+	// any boundary trips. state carries the run id; status the budget details.
+	BudgetWarning(state *policy.State, status policy.BudgetStatus)
 	// UpstreamError reports a failed upstream request or response read.
 	UpstreamError()
 	// LedgerError reports a failed durable write (a call or stop record).
@@ -47,6 +50,9 @@ func (NopObserver) CallRefused(meter.Provider, string) {}
 
 // RunStopped ignores the event.
 func (NopObserver) RunStopped(*policy.State) {}
+
+// BudgetWarning ignores the event.
+func (NopObserver) BudgetWarning(*policy.State, policy.BudgetStatus) {}
 
 // UpstreamError ignores the event.
 func (NopObserver) UpstreamError() {}
@@ -78,6 +84,13 @@ func (m MultiObserver) RunStopped(s *policy.State) {
 	}
 }
 
+// BudgetWarning forwards to each observer.
+func (m MultiObserver) BudgetWarning(s *policy.State, status policy.BudgetStatus) {
+	for _, o := range m {
+		o.BudgetWarning(s, status)
+	}
+}
+
 // UpstreamError forwards to each observer.
 func (m MultiObserver) UpstreamError() {
 	for _, o := range m {
@@ -105,6 +118,9 @@ func (stopLineObserver) CallRefused(meter.Provider, string) {}
 
 // RunStopped invokes the callback.
 func (o stopLineObserver) RunStopped(s *policy.State) { o.onStop(s) }
+
+// BudgetWarning ignores the event.
+func (stopLineObserver) BudgetWarning(*policy.State, policy.BudgetStatus) {}
 
 // UpstreamError ignores the event.
 func (stopLineObserver) UpstreamError() {}

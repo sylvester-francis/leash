@@ -111,6 +111,12 @@ zero. The comparison is strict - a window delta exactly at the maximum does not
 trip. Reach for the rate limit to catch a loop that accelerates, spending faster
 and faster, before its total budget is reached.
 
+Unlike every other boundary, the rate limit is **backpressure, not a terminal
+stop**. A refused call returns 429 with a `Retry-After` header (the window in
+seconds), and the run keeps running: once the trailing window decays below the
+limit, its calls proceed again. A well-behaved client honors `Retry-After` and
+retries. The other boundaries stop the run for good (stopped stays stopped).
+
 ## Stall
 
 ```sh

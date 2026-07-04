@@ -193,6 +193,7 @@ func cmdRun(args []string) int {
 		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
 		OnBlind:               onBlind,
 		MaxCostPerCall:        c.maxCostPerCall,
+		WarnAt:                c.warnAt,
 		Logger:                logger,
 	})
 	if err != nil {
@@ -224,6 +225,8 @@ func cmdServe(args []string) int {
 		"refuse requests without an X-Loop-Id instead of pooling them into the default run")
 	admin := fs.String("admin", envStr("LEASH_ADMIN", ""),
 		"address for the admin listener serving /healthz, /readyz, /metrics (empty disables)")
+	webhook := fs.String("webhook", envStr("LEASH_WEBHOOK", ""),
+		"URL to POST a JSON event to when a run approaches a budget (--warn-at) or a boundary stops it (empty disables)")
 	standby := fs.Bool("standby", envBool("LEASH_STANDBY", false),
 		"wait for the governance lease instead of erroring when another instance holds it (active/passive HA)")
 	authToken := fs.String("auth-token", envStr("LEASH_AUTH_TOKEN", ""),
@@ -310,6 +313,10 @@ func cmdServe(args []string) int {
 		metrics = proxy.NewMetrics(version, g.Prices)
 		observers = append(observers, metrics)
 	}
+	if *webhook != "" {
+		observers = append(observers, proxy.NewWebhookNotifier(*webhook, logger, time.Now))
+		logger.Info("webhook notifications enabled", "url", *webhook)
+	}
 
 	if *standby {
 		// --standby is only meaningful across processes, which SQLite's
@@ -333,6 +340,7 @@ func cmdServe(args []string) int {
 		MaxRuns:               *maxRuns,
 		OnBlind:               onBlind,
 		MaxCostPerCall:        c.maxCostPerCall,
+		WarnAt:                c.warnAt,
 		Logger:                logger,
 		Observer:              observers,
 	}, *standby, standbyRetryInterval, logger)

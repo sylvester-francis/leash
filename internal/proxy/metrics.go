@@ -46,6 +46,7 @@ type Metrics struct {
 	blindCalls     int64
 	upstreamErrors int64
 	ledgerErrors   int64
+	budgetWarnings map[string]int64 // reason -> count
 }
 
 // NewMetrics returns an empty registry stamped with version. The price table
@@ -58,6 +59,7 @@ func NewMetrics(version string, prices policy.PriceTable) *Metrics {
 		callsForwarded: map[string]int64{},
 		callsRefused:   map[string]int64{},
 		stops:          map[string]int64{},
+		budgetWarnings: map[string]int64{},
 	}
 }
 
@@ -88,6 +90,14 @@ func (m *Metrics) RunStopped(s *policy.State) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stops[s.StopReason]++
+}
+
+// BudgetWarning records a run approaching a budget, keyed by which budget. The
+// run id is not a label (unbounded cardinality); it is in the log and webhook.
+func (m *Metrics) BudgetWarning(_ *policy.State, status policy.BudgetStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.budgetWarnings[status.Reason]++
 }
 
 // UpstreamError records one upstream failure.
@@ -147,6 +157,12 @@ func (m *Metrics) WriteTo(w io.Writer, activeRuns int) {
 	b.WriteString("# HELP leash_ledger_errors_total Durable-write failures (a call or stop record).\n")
 	b.WriteString("# TYPE leash_ledger_errors_total counter\n")
 	fmt.Fprintf(&b, "leash_ledger_errors_total %d\n", m.ledgerErrors)
+
+	b.WriteString("# HELP leash_budget_warnings_total Runs that crossed a warn threshold, by budget.\n")
+	b.WriteString("# TYPE leash_budget_warnings_total counter\n")
+	for _, reason := range sortedKeys(m.budgetWarnings) {
+		fmt.Fprintf(&b, "leash_budget_warnings_total{reason=%q} %d\n", reason, m.budgetWarnings[reason])
+	}
 
 	b.WriteString("# HELP leash_build_info Build version, always 1.\n")
 	b.WriteString("# TYPE leash_build_info gauge\n")
