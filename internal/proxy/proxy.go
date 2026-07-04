@@ -25,6 +25,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -269,6 +270,9 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Scope the run to the caller's credential so one tenant cannot touch or read
+	// another tenant's run by naming its id.
+	runID = namespaceRun(p.tenantKey(r), runID)
 	provider := meter.DetectProvider(r.URL.Path, r.Header)
 
 	rs, ok := p.runStateFor(runID)
@@ -536,6 +540,27 @@ func (p *Proxy) authorized(r *http.Request) bool {
 		match |= subtle.ConstantTimeCompare(got[:], p.authDigests[i][:])
 	}
 	return match == 1
+}
+
+// tenantKey derives a stable, opaque namespace from the caller's credential, so
+// the same run id presented with two different tokens maps to two isolated runs.
+// It is empty when auth is off (a single shared namespace). Call only after
+// authorized has passed; the token itself is never logged or stored.
+func (p *Proxy) tenantKey(r *http.Request) string {
+	if !p.authOn {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(r.Header.Get(authHeader)))
+	return hex.EncodeToString(sum[:4])
+}
+
+// namespaceRun scopes a client run id to its tenant. With auth off (empty
+// tenant) the id is unchanged, preserving single-tenant behavior.
+func namespaceRun(tenant, runID string) string {
+	if tenant == "" {
+		return runID
+	}
+	return tenant + "-" + runID
 }
 
 // runStateFor returns the per-run serializer, creating it on first touch. ok is

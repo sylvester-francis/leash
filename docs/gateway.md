@@ -16,8 +16,13 @@ a header.
 ## Starting the server
 
 ```sh
-leash serve --listen :8088 --max-cost 5.00 --prices prices.json
+LEASH_AUTH_TOKEN=$(leash gen-token) leash serve --listen :8088 --max-cost 5.00 --prices prices.json
 ```
+
+`serve` requires an auth token by default (clients send it as `X-Leash-Token`);
+pass `--insecure` to run open on a trusted local socket. With auth on, each run
+is scoped to the presenting credential, so two tenants sharing an `X-Loop-Id`
+get separate budgets.
 
 `serve` accepts the wrapper's meter and boundary flags - `--max-cost`,
 `--max-calls`, `--deadline`, `--rate`, `--stall`, `--prices`, `--compute-rate`,

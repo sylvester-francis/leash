@@ -68,8 +68,16 @@ header gets 400.
 | `--require-run-id` | bool | `false` | refuse a request with no `X-Loop-Id` (400) instead of pooling it into `default` |
 | `--admin` | address | off | admin listener for `/healthz`, `/readyz`, `/metrics`; empty disables |
 | `--standby` | bool | `false` | wait for the governance lease instead of erroring when another instance holds it (active/passive HA) |
-| `--auth-token` | string | off | require a matching `X-Leash-Token` header; space-separate two for zero-downtime rotation; prefer `LEASH_AUTH_TOKEN` |
+| `--auth-token` | string | required | require a matching `X-Leash-Token` header; space-separate two for zero-downtime rotation; prefer `LEASH_AUTH_TOKEN` |
+| `--insecure` | bool | `false` | allow serving with no `--auth-token` (forwards live API keys unauthenticated) |
 | `--max-runs` | int | `0` | cap on runs tracked in memory at once; a new run beyond it is refused 503 (0 disables) |
+
+`serve` refuses to start without `--auth-token` (or `LEASH_AUTH_TOKEN`) unless
+`--insecure` is given: an open gateway forwards live provider keys to anyone who
+can reach it. With auth on, each run is scoped to the presenting credential -
+two tenants using the same `X-Loop-Id` get separate, isolated budgets - so a
+caller cannot burn or read another tenant's run. The run ids `ps`/`inspect`/`kill`
+show are the tenant-scoped ids.
 
 `ps` and `inspect` accept the governance flags too, so `--db`, `--prices`, and
 `--compute-rate` let them compute and display costs, and both take `--json`.
