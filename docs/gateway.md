@@ -185,7 +185,7 @@ traffic to that one host. Set it when you want leash in front of:
   fail).
 
 ```sh
-leash serve --listen :8088 --upstream https://gateway.internal --prices prices.json
+LEASH_AUTH_TOKEN=$(cat token) leash serve --listen :8088 --upstream https://gateway.internal --prices prices.json
 ```
 
 A request leash cannot classify by wire format is still counted as one call and
@@ -262,7 +262,7 @@ same runs is the case that needs a cross-process lease. Point `--db` at Postgres
 to get one:
 
 ```sh
-leash serve --listen :8088 --db postgres://user:pass@host/leash --max-cost 20
+LEASH_AUTH_TOKEN=$(cat token) leash serve --listen :8088 --db postgres://user:pass@host/leash --max-cost 20
 ```
 
 A `postgres://` `--db` selects rerun's Postgres backend, whose governance lease

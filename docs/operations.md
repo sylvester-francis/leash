@@ -76,7 +76,10 @@ detail comes from `leash ps` and `leash inspect` against the same `--db`.
 With a Postgres ledger the governance lease is a cross-process advisory lock, so
 exactly one instance governs at a time. Run a warm standby:
 
+Both instances read the same `LEASH_AUTH_TOKEN` (serve requires a token):
+
 ```sh
+export LEASH_AUTH_TOKEN=$(cat /etc/leash/token)
 # primary
 leash serve --listen :8088 --admin :9090 --db postgres://user:pass@db/leash --max-cost 20
 # standby, same ledger

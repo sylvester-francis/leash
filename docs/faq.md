@@ -17,10 +17,12 @@ In Tier 2 (serve), you point the agent's `base_url` at the leash address and add
 one header, `X-Loop-Id`, so each run gets its own durable budget:
 
 ```sh
-leash serve --listen :8088 --max-cost 5.00 --prices prices.json
+LEASH_AUTH_TOKEN=$(leash gen-token) leash serve --listen :8088 --max-cost 5.00 --prices prices.json
 ```
 
-Without an `X-Loop-Id`, a served request falls back to a single "default" run.
+`serve` requires a token by default (clients send it as `X-Leash-Token`); pass
+`--insecure` for a trusted local socket. Without an `X-Loop-Id`, a served request
+falls back to a single "default" run.
 
 ## How is this different from my framework's max-steps setting?
 
@@ -60,12 +62,14 @@ zero.
 
 ## What happens if the provider does not report usage?
 
-The token meter is blind for that call: leash counts zero tokens, logs the blind
-warning once for the run, and relies on the boundaries that do not need token
-counts (kill, deadline, calls, stall). The rate limit meters tokens per window,
-so it is blind on that call too. leash never guesses a token count to fill the
-gap. If nothing makes a meter live at all, leash warns, once and loudly, that
-the token meter is blind.
+The token meter is blind for that call. When a cost budget is active, leash
+fails closed by default (`--on-blind=refuse`): an endpoint it cannot meter is
+refused before it is forwarded, and a known-provider call that comes back
+unmeterable stops the run, so no spend goes uncounted. `--on-blind=warn` keeps
+the older behavior - count zero tokens, warn once, carry on - and `allow`
+forwards silently. With no cost budget set, a blind call is harmless and is
+allowed; the boundaries that need no token counts (kill, deadline, calls, stall)
+still hold the run. leash never guesses a token count to fill the gap.
 
 ## Does it break streaming?
 
@@ -83,8 +87,12 @@ token meter something to read. Turn it off with `--no-inject` and accept a blind
 token meter on those calls:
 
 ```sh
-leash serve --no-inject --max-cost 5.00 --prices prices.json
+LEASH_AUTH_TOKEN=$(leash gen-token) leash serve --no-inject --max-cost 5.00 --prices prices.json
 ```
+
+Note that with `--no-inject` and the default `--on-blind=refuse`, a streaming
+call that returns no usage will stop the run; set `--on-blind=warn` if you want
+those calls to pass while only warning.
 
 ## Does leash see or store my API keys or prompt and response bodies?
 

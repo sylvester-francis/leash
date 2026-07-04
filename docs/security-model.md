@@ -5,19 +5,26 @@ plainly so an operator can place leash correctly in a network.
 
 ## The trust boundary
 
-By default leash trusts the network segment between the agent and the proxy:
-with no token configured, anyone who can reach the listener can spend under any
-run id. Do not rely on that alone on an untrusted network.
+`serve` requires an auth token by default: it refuses to start without
+`--auth-token` / `LEASH_AUTH_TOKEN` unless you pass `--insecure`, so an open
+listener does not forward live provider keys to anyone who can reach it. With
+`--insecure` (a trusted local socket, the wrapper's loopback proxy), leash trusts
+the network segment between the agent and the proxy. Do not run `--insecure` on
+an untrusted network.
 
 Mitigations, in order of leverage:
 
-- **Authenticate.** `--auth-token` (prefer the `LEASH_AUTH_TOKEN` environment
-  variable so the secret stays out of the process list) requires every request
-  to carry a matching `X-Leash-Token` header, so reaching the listener is not
-  enough to spend. The token is compared in constant time and never logged or
-  forwarded upstream. Generate a strong one with `leash gen-token`. leash does
-  not authenticate identities per caller - that belongs at an ingress or service
-  mesh (mTLS, OIDC) in front of leash, which it composes with.
+- **Authenticate.** `--auth-token` (prefer `LEASH_AUTH_TOKEN` so the secret stays
+  out of the process list, or `--auth-token-file`) requires every request to carry
+  a matching `X-Leash-Token` header, so reaching the listener is not enough to
+  spend. It is on by default: `serve` refuses to start without a token unless
+  `--insecure` is set. The token is compared in constant time and never logged or
+  forwarded upstream. Generate a strong one with `leash gen-token`. leash does not
+  authenticate end-user identities - that belongs at an ingress or service mesh
+  (mTLS, OIDC) in front of leash, which it composes with - but when auth is on it
+  does isolate tenants: a run id is scoped to the presenting credential, so two
+  tokens using the same `X-Loop-Id` get separate budgets and neither can burn or
+  read the other's run.
 - **Rotate the token.** It is a static shared secret with no expiry; rotate it
   periodically and on any suspected leak. Configure two tokens (space-separated)
   for a zero-downtime overlap: accept the old and new token, roll clients to the

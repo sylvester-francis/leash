@@ -68,12 +68,19 @@ cheap loop that never terminates is still a problem.
 
 Trips when the run's total cost - token cost plus compute cost - reaches the
 budget. This is the headline boundary: "this run cannot spend more than $X."
+Because a call's cost is known only after the upstream serves it, the call that
+crosses the budget still completes: the budget can overshoot by one in-flight
+call. Bound that call with `--max-cost-per-call`, which stops the run if any
+single call's token cost exceeds the cap.
 
 It only trips if a meter is live. If you set `--max-cost` but supply neither
-`--prices` nor a `--compute-rate`, the total cost stays zero and the budget never
-trips; leash warns you, once and loudly, that the token meter is blind. Supply a
-price table (`--prices`) to meter tokens, a compute rate (`--compute-rate`) to
-meter machine time, or both. See [cost-model.md](cost-model.md).
+`--prices` nor a `--compute-rate`, the total cost stays zero; leash warns you,
+once and loudly, that the token meter is blind. And because it cannot price
+calls, the default `--on-blind=refuse` makes it fail closed - refusing an
+unmeterable endpoint and stopping a run whose call comes back unmeterable -
+rather than spend blindly (set `--on-blind=warn` to only warn). Supply a price
+table (`--prices`) to meter tokens, a compute rate (`--compute-rate`) to meter
+machine time, or both. See [cost-model.md](cost-model.md).
 
 ## Max calls
 
