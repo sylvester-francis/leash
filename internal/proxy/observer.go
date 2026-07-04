@@ -17,6 +17,7 @@ package proxy
 import (
 	"github.com/sylvester-francis/leash/internal/meter"
 	"github.com/sylvester-francis/leash/internal/policy"
+	"time"
 )
 
 // Observer is the side channel for governance events; it subsumes the old
@@ -37,6 +38,10 @@ type Observer interface {
 	UpstreamError()
 	// LedgerError reports a failed durable write (a call or stop record).
 	LedgerError()
+	// RequestStarted reports an HTTP request entering the proxy (in-flight++).
+	RequestStarted()
+	// RequestFinished reports it leaving, with the final status and latency.
+	RequestFinished(status int, dur time.Duration)
 }
 
 // NopObserver ignores every event. New installs it when Config.Observer is nil.
@@ -59,6 +64,12 @@ func (NopObserver) UpstreamError() {}
 
 // LedgerError ignores the event.
 func (NopObserver) LedgerError() {}
+
+// RequestStarted ignores the event.
+func (NopObserver) RequestStarted() {}
+
+// RequestFinished ignores the event.
+func (NopObserver) RequestFinished(int, time.Duration) {}
 
 // MultiObserver fans each event out to several Observers in order.
 type MultiObserver []Observer
@@ -105,6 +116,20 @@ func (m MultiObserver) LedgerError() {
 	}
 }
 
+// RequestStarted forwards to each observer.
+func (m MultiObserver) RequestStarted() {
+	for _, o := range m {
+		o.RequestStarted()
+	}
+}
+
+// RequestFinished forwards to each observer.
+func (m MultiObserver) RequestFinished(status int, dur time.Duration) {
+	for _, o := range m {
+		o.RequestFinished(status, dur)
+	}
+}
+
 // stopLineObserver adapts a stop-line callback to the Observer seam.
 type stopLineObserver struct {
 	onStop func(*policy.State)
@@ -127,6 +152,12 @@ func (stopLineObserver) UpstreamError() {}
 
 // LedgerError ignores the event.
 func (stopLineObserver) LedgerError() {}
+
+// RequestStarted ignores the event.
+func (stopLineObserver) RequestStarted() {}
+
+// RequestFinished ignores the event.
+func (stopLineObserver) RequestFinished(int, time.Duration) {}
 
 // StopLineObserver returns an Observer that calls onStop once when a run stops.
 func StopLineObserver(onStop func(*policy.State)) Observer {

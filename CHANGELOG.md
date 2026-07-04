@@ -66,6 +66,11 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
+- Request-level observability. A `leash_request_duration_seconds` histogram, a
+  `leash_requests_in_flight` gauge, and `leash_responses_total{code}` counters
+  (so a `503` is distinguishable from a boundary `429`), plus an `X-Request-Id`
+  header on every response - propagated when safe, minted otherwise - that also
+  appears in a per-request debug log.
 - Soft limits and alerting. `--warn-at` (default 0.8) fires a one-time warning
   per run when a budget (cost, calls, deadline) crosses a fraction of its ceiling
   - a structured log, a `leash_budget_warnings_total{reason}` metric, and an
