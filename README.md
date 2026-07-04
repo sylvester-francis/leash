@@ -22,6 +22,10 @@
 
 `leash -- python my_agent.py` - zero code change, one binary, one stop line.
 
+<br>
+
+<img src="docs/leash-demo.gif" alt="leash meters an agent's calls and stops it the moment the $0.10 budget trips" width="760">
+
 </div>
 
 ---
