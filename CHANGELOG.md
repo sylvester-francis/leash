@@ -7,6 +7,12 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Fixed
+- Ledger appends are now idempotent by tag. A durable write that commits but
+  returns an error to its caller is no longer re-recorded on retry: the append
+  re-read path returns the existing journal position for a tag it already finds,
+  so a call cannot be counted twice (an over-count the crash tests did not cover).
+
 ## [0.2.3] - 2026-07-04
 
 ### Added
