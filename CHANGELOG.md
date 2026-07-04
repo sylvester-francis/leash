@@ -15,6 +15,10 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 - A workflow publishing the distroless image to GHCR
   (`ghcr.io/sylvester-francis/leash`) on each release tag.
 
+### Changed
+- CI gates on `gofmt` and `staticcheck -checks=all` via a new `make lint`; the
+  tree passes both with zero findings.
+
 ### Fixed
 - Landing page: the note arrow (`->`) no longer breaks across two lines under
   width pressure.

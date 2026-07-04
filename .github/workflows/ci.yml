@@ -28,6 +28,16 @@ jobs:
       - run: make ascii-check
       - run: make doc-check
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          check-latest: true
+      - run: make lint
+
   windows-build:
     # Signal forwarding to children is not supported on Windows (guarded by a
     # GOOS build tag), so Windows is build-only: no test run.
