@@ -63,6 +63,14 @@ Scrape the `--admin` `/metrics` endpoint. The series worth alerting on:
   signal: alert on it to intervene before a run hits its ceiling, rather than
   finding out from `leash_stops_total`. For push-style alerts, point
   `serve --webhook URL` at your incident tool and act on the `warning` event.
+- Gateway health, from the request metrics:
+  - `histogram_quantile(0.99, rate(leash_request_duration_seconds_bucket[5m]))`
+    for tail latency (long streamed completions live in the upper buckets).
+  - `leash_requests_in_flight` for concurrency; a climbing value with flat
+    throughput means requests are backing up.
+  - `sum(rate(leash_responses_total{code=~"5.."}[5m]))` for server-side errors,
+    which distinguishes a `503` (capacity or draining) from a boundary `429`.
+  Correlate a specific client call with the logs via its `X-Request-Id`.
 - `increase(leash_stops_total{reason="..."}[...])`. Watch which boundaries fire.
   A spike in `cost_budget` or `max_calls` stops may mean a runaway agent; a spike
   in `stall` means agents repeating themselves.

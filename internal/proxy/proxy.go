@@ -23,6 +23,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -252,19 +253,87 @@ func (p *Proxy) Shutdown() error {
 	return nil
 }
 
-// ServeHTTP governs one request, recovering any panic in the request path into
-// a 500 (logging the stack with no request data) so one bad request cannot take
-// the gateway down.
+// ServeHTTP governs one request. It stamps a request id (echoed as X-Request-Id
+// and logged), meters latency and status for the metrics, and recovers any panic
+// in the request path into a 500 (logging the stack with no request data) so one
+// bad request cannot take the gateway down.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := p.cfg.Now()
+	reqID := requestID(r)
+	w.Header().Set("X-Request-Id", reqID)
+	rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+	p.cfg.Observer.RequestStarted()
 	defer func() {
 		if rec := recover(); rec != nil {
 			// Log the panic and stack only; never the request, headers, or body.
 			p.cfg.Logger.Error("panic recovered in request path",
-				"panic", rec, "stack", string(debug.Stack()))
-			p.writeGatewayError(w, http.StatusInternalServerError, "internal error")
+				"panic", rec, "stack", string(debug.Stack()), "request_id", reqID)
+			p.writeGatewayError(rw, http.StatusInternalServerError, "internal error")
 		}
+		dur := p.cfg.Now().Sub(start)
+		p.cfg.Observer.RequestFinished(rw.status, dur)
+		p.cfg.Logger.Debug("request served", "method", r.Method, "path", r.URL.Path,
+			"status", rw.status, "duration_ms", dur.Milliseconds(), "request_id", reqID)
 	}()
-	p.serve(w, r)
+	p.serve(rw, r)
+}
+
+// statusWriter wraps a ResponseWriter to capture the response status for the
+// metrics while preserving streaming: it forwards Flush so SSE responses still
+// stream through untouched. The status defaults to 200 when WriteHeader is never
+// called explicitly.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+	wrote  bool
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	if !s.wrote {
+		s.status = code
+		s.wrote = true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(b []byte) (int, error) {
+	s.wrote = true
+	return s.ResponseWriter.Write(b)
+}
+
+func (s *statusWriter) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// requestID echoes a safe incoming X-Request-Id or mints a fresh random one, so
+// a client can correlate its request with leash's logs and metrics.
+func requestID(r *http.Request) string {
+	if id := r.Header.Get("X-Request-Id"); validRequestID(id) {
+		return id
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// validRequestID accepts a bounded, printable token so a reflected id cannot
+// inject into logs or response headers.
+func validRequestID(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 // serve governs one request without the panic guard.

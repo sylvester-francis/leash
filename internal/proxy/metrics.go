@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sylvester-francis/leash/internal/meter"
 	"github.com/sylvester-francis/leash/internal/policy"
@@ -47,7 +48,16 @@ type Metrics struct {
 	upstreamErrors int64
 	ledgerErrors   int64
 	budgetWarnings map[string]int64 // reason -> count
+	inFlight       int64
+	responses      map[int]int64 // status code -> count
+	durSum         float64       // sum of request latencies, seconds
+	durCount       int64
+	durBuckets     []int64 // cumulative counts aligned to latencyBuckets
 }
+
+// latencyBuckets are the request-duration histogram upper bounds, in seconds.
+// They span a fast refusal to a long streamed completion.
+var latencyBuckets = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60}
 
 // NewMetrics returns an empty registry stamped with version. The price table
 // attributes a dollar cost to forwarded tokens; a nil table leaves the cost
@@ -60,6 +70,31 @@ func NewMetrics(version string, prices policy.PriceTable) *Metrics {
 		callsRefused:   map[string]int64{},
 		stops:          map[string]int64{},
 		budgetWarnings: map[string]int64{},
+		responses:      map[int]int64{},
+		durBuckets:     make([]int64, len(latencyBuckets)),
+	}
+}
+
+// RequestStarted marks a request entering the proxy.
+func (m *Metrics) RequestStarted() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inFlight++
+}
+
+// RequestFinished records a completed request's status and latency.
+func (m *Metrics) RequestFinished(status int, dur time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inFlight--
+	m.responses[status]++
+	secs := dur.Seconds()
+	m.durSum += secs
+	m.durCount++
+	for i, bound := range latencyBuckets {
+		if secs <= bound {
+			m.durBuckets[i]++
+		}
 	}
 }
 
@@ -172,6 +207,26 @@ func (m *Metrics) WriteTo(w io.Writer, activeRuns int) {
 	b.WriteString("# TYPE leash_active_runs gauge\n")
 	fmt.Fprintf(&b, "leash_active_runs %d\n", activeRuns)
 
+	b.WriteString("# HELP leash_requests_in_flight HTTP requests currently being served.\n")
+	b.WriteString("# TYPE leash_requests_in_flight gauge\n")
+	fmt.Fprintf(&b, "leash_requests_in_flight %d\n", m.inFlight)
+
+	b.WriteString("# HELP leash_responses_total HTTP responses by status code.\n")
+	b.WriteString("# TYPE leash_responses_total counter\n")
+	for _, code := range sortedIntKeys(m.responses) {
+		fmt.Fprintf(&b, "leash_responses_total{code=\"%d\"} %d\n", code, m.responses[code])
+	}
+
+	b.WriteString("# HELP leash_request_duration_seconds Request latency in seconds.\n")
+	b.WriteString("# TYPE leash_request_duration_seconds histogram\n")
+	for i, bound := range latencyBuckets {
+		fmt.Fprintf(&b, "leash_request_duration_seconds_bucket{le=%q} %d\n",
+			strconv.FormatFloat(bound, 'g', -1, 64), m.durBuckets[i])
+	}
+	fmt.Fprintf(&b, "leash_request_duration_seconds_bucket{le=\"+Inf\"} %d\n", m.durCount)
+	fmt.Fprintf(&b, "leash_request_duration_seconds_sum %s\n", strconv.FormatFloat(m.durSum, 'g', -1, 64))
+	fmt.Fprintf(&b, "leash_request_duration_seconds_count %d\n", m.durCount)
+
 	_, _ = io.WriteString(w, b.String())
 }
 
@@ -182,6 +237,16 @@ func sortedKeys(m map[string]int64) []string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	return keys
+}
+
+// sortedIntKeys returns an int-keyed map's keys sorted ascending.
+func sortedIntKeys(m map[int]int64) []int {
+	keys := make([]int, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
 	return keys
 }
 

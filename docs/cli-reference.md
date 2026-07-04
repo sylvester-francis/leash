@@ -238,8 +238,14 @@ The metrics carry no run-id labels. Counters: `leash_calls_total{decision,
 provider}`, `leash_stops_total{reason}`, `leash_tokens_total{kind}`,
 `leash_token_cost_usd_total`, `leash_blind_calls_total`,
 `leash_upstream_errors_total`, `leash_ledger_errors_total`,
-`leash_budget_warnings_total{reason}`. Gauges: `leash_build_info{version}`,
-`leash_active_runs`. See docs/deployment.md and docs/operations.md.
+`leash_budget_warnings_total{reason}`, `leash_responses_total{code}`. Gauges:
+`leash_build_info{version}`, `leash_active_runs`, `leash_requests_in_flight`.
+Histogram: `leash_request_duration_seconds`. See docs/deployment.md and
+docs/operations.md.
+
+Every response carries an `X-Request-Id` header - a fresh id, or a safe incoming
+one propagated - which also appears in leash's per-request debug log, for
+correlating a client request with the gateway's logs.
 
 ## Webhooks
 
