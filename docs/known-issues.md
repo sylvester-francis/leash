@@ -37,22 +37,31 @@ docs cover the guarantees that *do* hold.
 ## Roadmap (deferred, not yet built)
 
 These are real capabilities leash does not have. They are scoped out of the
-current releases, not overlooked.
+current releases, not overlooked. Each is tracked as a GitHub issue under the
+[`roadmap`](https://github.com/sylvester-francis/leash/labels/roadmap) label.
 
-- **Horizontal scale.** One active governor owns a ledger at a time; throughput
-  is one process. Per-run sharding across governors (so a fleet can share one
-  logical budget) is future work. `--standby` is failover, not scale-out.
-- **Hierarchical multi-tenant quotas.** Budgets are per run (per credential when
-  auth is on). A quota that nests call < run < team < org, with limits at each
-  level, is not modeled yet.
-- **Soft limits and backpressure.** Boundaries are a hard 429 cliff. Warn
-  thresholds, `Retry-After` / queueing, and approach-to-budget webhooks or alerts
-  are not built; the run-scoped observer channel they need is intentionally
-  absent today.
-- **Richer observability.** The metrics are counters and gauges. A
-  request-latency histogram, an in-flight gauge, status-class counters, and
-  request-id / trace propagation are not yet exported.
-- **Release supply chain.** Binaries and the image are published with checksums
-  but are not yet cosign-signed, and ship no SBOM or SLSA provenance.
+- **Horizontal scale** ([#20](https://github.com/sylvester-francis/leash/issues/20)).
+  One active governor owns a ledger at a time; throughput is one process. Per-run
+  sharding across governors (so a fleet can share one logical budget) is future
+  work. `--standby` is failover, not scale-out.
+- **Hierarchical multi-tenant quotas** ([#21](https://github.com/sylvester-francis/leash/issues/21)).
+  Budgets are per run (per credential when auth is on). A quota that nests
+  call < run < team < org, with limits at each level, is not modeled yet.
+- **Soft limits and backpressure** ([#22](https://github.com/sylvester-francis/leash/issues/22)).
+  Boundaries are a hard 429 cliff. Warn thresholds, `Retry-After` / queueing, and
+  approach-to-budget webhooks or alerts are not built; the run-scoped observer
+  channel they need is intentionally absent today.
+- **Richer observability** ([#23](https://github.com/sylvester-francis/leash/issues/23)).
+  The metrics are counters and gauges. A request-latency histogram, an in-flight
+  gauge, status-class counters, and request-id / trace propagation are not yet
+  exported.
+- **Release supply chain** ([#25](https://github.com/sylvester-francis/leash/issues/25)).
+  Binaries and the image are published with checksums but are not yet
+  cosign-signed, and ship no SBOM or SLSA provenance.
 
-Have a use case that one of these blocks? Open an issue - it helps prioritize.
+Two of the limitations above are also tracked for a fix: the Windows SQLite lock
+([#24](https://github.com/sylvester-francis/leash/issues/24)) and the append
+idempotency edge case ([#26](https://github.com/sylvester-francis/leash/issues/26)).
+
+Have a use case that one of these blocks? Comment on the issue - it helps
+prioritize.
