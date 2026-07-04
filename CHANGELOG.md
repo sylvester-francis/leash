@@ -18,6 +18,11 @@ metering-integrity gaps. It is the first release to change default behavior.
   behavior with `--on-blind=warn` (or `allow`). Set via `LEASH_ON_BLIND`.
 
 ### Fixed
+- **Reasoning tokens were double-charged.** Reasoning tokens are a subset of the
+  reported output tokens, but leash charged them at both the output and the
+  reasoning rate, and double-counted them in the rate limiter. Now the
+  non-reasoning output is charged at the output rate and the reasoning subset at
+  the reasoning rate (or the output rate when none is set) - each token once.
 - **Metering evasion / silent $0.** A usage block shaped for a different provider
   (e.g. an OpenAI body mis-tagged Anthropic via an `Anthropic-Version` header) is
   now treated as blind, not a real zero. The OpenAI Responses API (`/responses`,
@@ -34,6 +39,9 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
+- `--max-cost-per-call` (env `LEASH_MAX_COST_PER_CALL`) caps a single call's
+  token cost; a call over the cap stops the run (reason `max_cost_per_call`),
+  so a runaway large call cannot repeat. Bounds the one-call budget overshoot.
 - Optional proxy authentication: `serve --auth-token` (prefer `LEASH_AUTH_TOKEN`)
   requires a matching `X-Leash-Token` header, compared in constant time and never
   logged or forwarded. Space-separate two tokens for zero-downtime rotation.

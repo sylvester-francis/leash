@@ -42,10 +42,10 @@ type Usage struct {
 	ReasoningTokens int64 `json:"reasoning"`
 }
 
-// TotalTokens is the sum of input, output, and reasoning tokens. It is the
-// quantity the rate limiter meters.
+// TotalTokens is the number of tokens the rate limiter meters. Reasoning tokens
+// are a subset of the reported output tokens, so they are not added again.
 func (u Usage) TotalTokens() int64 {
-	return u.InputTokens + u.OutputTokens + u.ReasoningTokens
+	return u.InputTokens + u.OutputTokens
 }
 
 // Price is the dollar cost per one million tokens for a single model. All
@@ -74,9 +74,24 @@ func TokenCost(u Usage, table PriceTable) float64 {
 	if !ok {
 		return 0
 	}
+	// Reasoning tokens are a subset of the reported output tokens (OpenAI's
+	// completion_tokens includes them), so charge the non-reasoning output at the
+	// output rate and reasoning at the reasoning rate. When no reasoning rate is
+	// set, reasoning falls under the output rate - so it is priced once, never
+	// twice, and never for free.
+	reasoning := u.ReasoningTokens
+	billableOutput := u.OutputTokens - reasoning
+	if billableOutput < 0 {
+		billableOutput = 0
+		reasoning = u.OutputTokens
+	}
+	reasoningRate := p.ReasoningPerM
+	if reasoningRate == 0 {
+		reasoningRate = p.OutputPerM
+	}
 	return float64(u.InputTokens)/tokensPerMillion*p.InputPerM +
-		float64(u.OutputTokens)/tokensPerMillion*p.OutputPerM +
-		float64(u.ReasoningTokens)/tokensPerMillion*p.ReasoningPerM
+		float64(billableOutput)/tokensPerMillion*p.OutputPerM +
+		float64(reasoning)/tokensPerMillion*reasoningRate
 }
 
 // ComputeCost returns the dollar cost of elapsed wall-clock time at ratePerHour

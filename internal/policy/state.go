@@ -97,8 +97,9 @@ func (s *State) Fold(u Usage, fingerprint string, at time.Time, prices PriceTabl
 	s.ReasoningTokens += u.ReasoningTokens
 	s.TokenCost += TokenCost(u, prices)
 	s.Samples = append(s.Samples, Sample{
-		At:               at,
-		CumulativeTokens: s.InputTokens + s.OutputTokens + s.ReasoningTokens,
+		At: at,
+		// Reasoning tokens are within output; do not add them again.
+		CumulativeTokens: s.InputTokens + s.OutputTokens,
 	})
 	s.foldStall(fingerprint)
 	// Keep TotalCost coherent even before a Refresh sets ComputeCost.

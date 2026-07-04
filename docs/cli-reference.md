@@ -32,6 +32,7 @@ the kill switch is always active.
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--max-cost` | dollars | `5.00` | budget over token + compute cost; `0` disables |
+| `--max-cost-per-call` | dollars | off | cap on a single call's token cost; over it stops the run; `0` disables |
 | `--max-calls` | int | `100` | maximum governed calls; `0` disables |
 | `--deadline` | duration | `30m` | wall-clock budget from the first call; `0` disables |
 | `--rate` | tokens/window | off | trailing token rate, e.g. `100000/1m`; empty disables |
@@ -146,9 +147,9 @@ A refused call returns HTTP 429 with:
 ```
 
 `reason` is one of `kill_switch`, `deadline`, `cost_budget`, `max_calls`,
-`rate_limit`, `stall`, or `meter_blind` (a call could not be metered under a cost
-budget with `--on-blind=refuse`). Every later call for a stopped run returns the
-same body.
+`rate_limit`, `stall`, `meter_blind` (a call could not be metered under a cost
+budget with `--on-blind=refuse`), or `max_cost_per_call` (a single call exceeded
+`--max-cost-per-call`). Every later call for a stopped run returns the same body.
 
 ## The stop line
 

@@ -42,9 +42,25 @@ func TestTokenCost(t *testing.T) {
 			want:  90,
 		},
 		{
-			name:  "reasoning tokens are priced when the model prices them",
-			usage: Usage{Model: "o1", ReasoningTokens: 1_000_000},
+			// Reasoning tokens are a subset of output. A response that is all
+			// reasoning (output == reasoning) is priced once, at the reasoning rate.
+			name:  "all-reasoning output is priced at the reasoning rate, once",
+			usage: Usage{Model: "o1", OutputTokens: 1_000_000, ReasoningTokens: 1_000_000},
 			want:  60,
+		},
+		{
+			// Reasoning must not be double-charged: output rate on the
+			// non-reasoning output, reasoning rate on the reasoning subset.
+			name:  "reasoning is not double-charged",
+			usage: Usage{Model: "o1", InputTokens: 1_000_000, OutputTokens: 1_000_000, ReasoningTokens: 500_000},
+			want:  15 + 30 + 30, // input 15, output 500k@60=30, reasoning 500k@60=30
+		},
+		{
+			// With no reasoning rate set (gpt-4 prices reasoning at 0), reasoning
+			// falls under the output rate: all output priced once, never free.
+			name:  "reasoning without a reasoning rate uses the output rate",
+			usage: Usage{Model: "gpt-4", OutputTokens: 1_000_000, ReasoningTokens: 400_000},
+			want:  60, // all 1M output at gpt-4 output rate 60
 		},
 		{
 			name:  "cost scales linearly below one million",
@@ -135,9 +151,9 @@ func TestLoadPriceTableRejectsGarbage(t *testing.T) {
 }
 
 func TestUsageTotalTokens(t *testing.T) {
-	// Distinct values in every field so the sum can only be right one way.
+	// Reasoning is a subset of output, so it is not summed again.
 	u := Usage{InputTokens: 100, OutputTokens: 20, ReasoningTokens: 3}
-	if got := u.TotalTokens(); got != 123 {
-		t.Fatalf("TotalTokens = %d, want 123", got)
+	if got := u.TotalTokens(); got != 120 {
+		t.Fatalf("TotalTokens = %d, want 120 (input+output; reasoning is within output)", got)
 	}
 }

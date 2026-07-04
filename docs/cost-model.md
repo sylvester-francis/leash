@@ -67,34 +67,37 @@ Two loader details worth knowing:
 
 ### The cost of one call
 
-For a call whose model is in the table, the cost is linear in each token count:
+For a call whose model is in the table, the cost is linear in each token count.
+Reasoning tokens are a **subset** of the reported output tokens (OpenAI's
+`completion_tokens` includes them), so they are priced once, never twice:
 
 ```
-token_cost = input     / 1,000,000 * input_rate
-           + output    / 1,000,000 * output_rate
-           + reasoning / 1,000,000 * reasoning_rate
+reasoning_rate := table[model].reasoning, or output_rate when that is 0
+token_cost = input               / 1,000,000 * input_rate
+           + (output - reasoning) / 1,000,000 * output_rate
+           + reasoning            / 1,000,000 * reasoning_rate
 ```
 
 Worked against the table above:
 
-| Model | input     | output    | reasoning | token_cost         |
-|-------|-----------|-----------|-----------|--------------------|
-| gpt-4 | 1,000,000 | 1,000,000 | 0         | 30 + 60 = 90.00    |
-| gpt-4 |   500,000 |   250,000 | 0         | 15 + 15 = 30.00    |
-| o1    |         0 |         0 | 1,000,000 | 60.00              |
+| Model | input     | output    | reasoning | token_cost              |
+|-------|-----------|-----------|-----------|-------------------------|
+| gpt-4 | 1,000,000 | 1,000,000 |         0 | 30 + 60 = 90.00         |
+| gpt-4 |   500,000 |   250,000 |         0 | 15 + 15 = 30.00         |
+| o1    | 1,000,000 | 1,000,000 |   500,000 | 15 + 30 + 30 = 75.00    |
 
 A run's token cost is the sum of every call's cost, accumulated as each call is
 journaled.
 
 ### Reasoning tokens
 
-Reasoning (or "thinking") tokens are priced by a separate `reasoning` rate, and
-only when both conditions hold: the model carries a nonzero reasoning rate in the
-table, and the wire reported reasoning tokens for that call (for example OpenAI's
-`completion_tokens_details.reasoning_tokens`). A model priced with
-`"reasoning": 0` - like `gpt-4o` above - never charges for reasoning tokens even
-if the provider reports them, and a call that reports zero reasoning tokens adds
-nothing regardless of the rate.
+Reasoning (or "thinking") tokens are part of the output the provider reports (for
+example OpenAI's `completion_tokens` already includes
+`completion_tokens_details.reasoning_tokens`). leash therefore prices the
+non-reasoning output at the `output` rate and the reasoning subset at the
+`reasoning` rate - each token once. When a model has no reasoning rate
+(`"reasoning": 0`, like `gpt-4o`), reasoning tokens fall under the `output` rate,
+so they are still priced, just not separately.
 
 ### leash never guesses
 

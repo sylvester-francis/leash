@@ -193,6 +193,7 @@ func cmdRun(args []string) int {
 		MaxBodyBytes:          c.maxBodyBytes,
 		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
 		OnBlind:               onBlind,
+		MaxCostPerCall:        c.maxCostPerCall,
 		Logger:                logger,
 	})
 	if err != nil {
@@ -300,6 +301,7 @@ func cmdServe(args []string) int {
 		AuthTokens:            authTokens,
 		MaxRuns:               *maxRuns,
 		OnBlind:               onBlind,
+		MaxCostPerCall:        c.maxCostPerCall,
 		Logger:                logger,
 		Observer:              observers,
 	}, *standby, standbyRetryInterval, logger)
