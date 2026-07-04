@@ -56,6 +56,10 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
+- `--shutdown-timeout` (default 30s, was a hard-coded 5s) bounds how long
+  graceful shutdown waits for in-flight streams, so long model streams are not
+  severed on deploy. `--drain-delay` fails `/readyz` and pauses before draining
+  so a load balancer can deregister the instance first.
 - `--max-conns` caps simultaneous client connections, so a flood of slow or idle
   clients cannot exhaust file descriptors or goroutines.
 - `--auth-token-file` reads auth token(s) from a file, keeping them off the

@@ -28,6 +28,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -38,9 +39,6 @@ import (
 	"github.com/sylvester-francis/leash/internal/term"
 	"github.com/sylvester-francis/leash/internal/wrap"
 )
-
-// serveShutdownTimeout bounds graceful shutdown of the standalone server.
-const serveShutdownTimeout = 5 * time.Second
 
 // standbyRetryInterval is how often a --standby instance retries acquiring the
 // governance lease while another instance holds it.
@@ -238,6 +236,10 @@ func cmdServe(args []string) int {
 		"read auth token(s) from this file (whitespace-separated) instead of a flag or env, keeping them off the process list")
 	maxConns := fs.Int("max-conns", envInt("LEASH_MAX_CONNS", 0),
 		"cap on simultaneous client connections; beyond it new connections wait (0 disables)")
+	shutdownTimeout := fs.Duration("shutdown-timeout", envDuration("LEASH_SHUTDOWN_TIMEOUT", 30*time.Second),
+		"how long graceful shutdown waits for in-flight streams to finish before forcing")
+	drainDelay := fs.Duration("drain-delay", envDuration("LEASH_DRAIN_DELAY", 0),
+		"on shutdown, mark /readyz not-ready then wait this long before draining, so a load balancer can deregister (0 disables)")
 	setUsage(fs, "leash serve - run the standalone governor gateway (Tier 2).",
 		"leash serve [flags]",
 		"leash serve --listen :8088 --max-cost 20 --prices prices.json",
@@ -344,11 +346,15 @@ func cmdServe(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// draining flips /readyz to 503 the moment shutdown begins, so a load
+	// balancer stops routing new work to this instance before its streams drain.
+	var draining atomic.Bool
+
 	// The admin listener (health, readiness, metrics) runs on its own address so
 	// it never collides with proxied API paths and can be network-segmented.
 	var adminSrv *http.Server
 	if *admin != "" {
-		adminSrv = proxy.NewAdminServer(*admin, l, p, metrics, authTokens)
+		adminSrv = proxy.NewAdminServer(*admin, l, p, metrics, authTokens, &draining)
 		go func() {
 			if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Error("admin server error", "err", err)
@@ -359,7 +365,14 @@ func cmdServe(args []string) int {
 
 	go func() {
 		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), serveShutdownTimeout)
+		// Signal not-ready first, optionally pause so a load balancer can
+		// deregister, then drain in-flight streams within the timeout.
+		draining.Store(true)
+		if *drainDelay > 0 {
+			logger.Info("draining: /readyz now failing, pausing before shutdown", "delay", *drainDelay)
+			time.Sleep(*drainDelay)
+		}
+		shutCtx, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
 		if adminSrv != nil {

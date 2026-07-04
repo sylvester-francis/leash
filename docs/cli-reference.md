@@ -73,6 +73,8 @@ header gets 400.
 | `--auth-token-file` | path | none | read auth token(s) from a file (whitespace-separated), keeping them off the process list |
 | `--max-conns` | int | `0` | cap on simultaneous client connections; beyond it new connections wait (0 disables) |
 | `--max-runs` | int | `0` | cap on runs tracked in memory at once; a new run beyond it is refused 503 (0 disables) |
+| `--shutdown-timeout` | duration | `30s` | how long graceful shutdown waits for in-flight streams before forcing |
+| `--drain-delay` | duration | `0` | on shutdown, fail `/readyz` then wait this long before draining, so a load balancer can deregister |
 
 `serve` refuses to start without `--auth-token` (or `LEASH_AUTH_TOKEN`) unless
 `--insecure` is given: an open gateway forwards live provider keys to anyone who
@@ -222,7 +224,8 @@ killed is red. Color is off for pipes, redirects, and `--json`, and honors the
 When `serve --admin ADDR` is set, a second HTTP server on `ADDR` serves:
 
 - `GET /healthz` - liveness, always `200 ok`.
-- `GET /readyz` - `200 ready` when a ledger read succeeds within 1s, else `503`.
+- `GET /readyz` - `200 ready` when a ledger write probe succeeds within 1s;
+  `503` when it fails or when the server is shutting down (draining).
 - `GET /metrics` - Prometheus text exposition (`text/plain; version=0.0.4`).
 
 The metrics carry no run-id labels. Counters: `leash_calls_total{decision,

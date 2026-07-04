@@ -132,7 +132,7 @@ func TestMaxRunsRefusesNewRunsAtCapacity(t *testing.T) {
 func TestMetricsRequiresTokenWhenAuthOn(t *testing.T) {
 	metrics := NewMetrics("v", policy.PriceTable{})
 	_, _, p := buildProxy(t, nil)
-	srv := NewAdminServer("", p.cfg.Ledger, p, metrics, []string{testToken})
+	srv := NewAdminServer("", p.cfg.Ledger, p, metrics, []string{testToken}, nil)
 	rec := func(h http.Header) int {
 		r, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
 		maps.Copy(r.Header, h)
