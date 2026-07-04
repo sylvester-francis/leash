@@ -288,6 +288,13 @@ func cmdServe(args []string) int {
 	}
 
 	if *standby {
+		// --standby is only meaningful across processes, which SQLite's
+		// process-local lease cannot coordinate. Refuse it rather than silently
+		// providing no mutual exclusion (a split-brain footgun).
+		if !strings.HasPrefix(c.db, "postgres://") && !strings.HasPrefix(c.db, "postgresql://") {
+			fmt.Fprintln(os.Stderr, "leash: --standby requires a postgres ledger (--db postgres://...); a SQLite lease is process-local")
+			return 2
+		}
 		logger.Info("standby mode: will wait for the governance lease", "db", c.db)
 	}
 	p, err := acquireProxy(proxy.Config{

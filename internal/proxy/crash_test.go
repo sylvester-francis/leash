@@ -69,8 +69,14 @@ func TestCrashResumePreservesBudgetNoDoubleCount(t *testing.T) {
 	if postCall(t, front1) != http.StatusTooManyRequests {
 		t.Fatalf("third call should trip max_calls")
 	}
-	// Simulate an unclean crash: abandon the proxy and ledger without shutdown.
+	// Simulate a crash: process 1 goes away. Its journal is already durable; the
+	// OS reclaims its governance lock on death, which we mimic here by releasing
+	// process 1 (in one test process the lock would otherwise never free). This
+	// is also the failover path - a new governor may take over only once the old
+	// one's lock is gone.
 	front1.Close()
+	_ = p1.Shutdown()
+	_ = l1.Close()
 
 	// Process 2: a fresh ledger and proxy over the same database.
 	l2, err := ledger.Open(db)

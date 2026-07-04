@@ -213,14 +213,21 @@ Reading and writing across processes works with SQLite. A `leash kill` or a
 SQLite's write-ahead log carries the concurrent reads and writes, and the bounded
 sequence-conflict retry keeps appends from colliding.
 
-Governing the same run twice at once is what the lease guards. `Acquire` takes a
-non-blocking lease on the run. With the SQLite backend that lease is
-process-local: it stops one process from governing the same run twice, but it
-does not coordinate across processes. Because it is process-local, a crash
-releases it for free - there is nothing left holding it - so a restart can
-re-acquire and resume. The operating rule for SQLite is therefore one governor
-process per ledger; cross-process reads and writes (`ps`, `inspect`, `kill`) are
-fine, but two `leash serve` processes must not govern the same SQLite ledger.
+Governing the same ledger twice at once is what the lease guards. `Acquire` takes
+a non-blocking lease. rerun's SQLite lease is process-local - it stops one process
+from governing twice but does not coordinate across processes - so leash adds an
+exclusive OS lock (`flock`) on a sidecar `<db>.govlock` file. A second `leash
+serve` on the same SQLite file fails to acquire and refuses to start (or, with
+`--standby`, waits), instead of silently double-governing and double-spending.
+The lock is tied to the process: a crash releases it for free, so a restart or a
+standby instance re-acquires and resumes. Cross-process reads and writes (`ps`,
+`inspect`, `kill`) take no lease and are unaffected.
+
+This OS lock is enforced on Unix (Linux, macOS). On other platforms (notably
+Windows) leash does not enforce it; there the operating rule stands - one governor
+process per SQLite ledger, or use Postgres. `--standby` requires a Postgres
+`--db` and is refused on SQLite, whose process-local lease cannot coordinate a
+takeover.
 
 For true cross-process mutual exclusion, point `--db` at Postgres:
 
