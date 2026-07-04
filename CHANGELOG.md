@@ -7,6 +7,8 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-04
+
 ### Added
 - Signed release supply chain. Release binaries are keyless-signed with cosign
   (a signature over `checksums.txt`, no private key), ship a CycloneDX SBOM per
@@ -185,7 +187,8 @@ Production hardening and release engineering.
   stream teeing, the wrapper, the standalone gateway, and the `ps`, `inspect`,
   and `kill` commands.
 
-[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/sylvester-francis/leash/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sylvester-francis/leash/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sylvester-francis/leash/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sylvester-francis/leash/compare/v0.1.1...v0.2.0
