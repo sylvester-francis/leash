@@ -7,6 +7,15 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-04
+
+### Added
+- Request-level observability. A `leash_request_duration_seconds` histogram, a
+  `leash_requests_in_flight` gauge, and `leash_responses_total{code}` counters
+  (so a `503` is distinguishable from a boundary `429`), plus an `X-Request-Id`
+  header on every response - propagated when safe, minted otherwise - that also
+  appears in a per-request debug log.
+
 ## [0.2.0] - 2026-07-04
 
 Following an adversarial architecture review, this release closes the
@@ -66,11 +75,6 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
-- Request-level observability. A `leash_request_duration_seconds` histogram, a
-  `leash_requests_in_flight` gauge, and `leash_responses_total{code}` counters
-  (so a `503` is distinguishable from a boundary `429`), plus an `X-Request-Id`
-  header on every response - propagated when safe, minted otherwise - that also
-  appears in a per-request debug log.
 - Soft limits and alerting. `--warn-at` (default 0.8) fires a one-time warning
   per run when a budget (cost, calls, deadline) crosses a fraction of its ceiling
   - a structured log, a `leash_budget_warnings_total{reason}` metric, and an
@@ -163,7 +167,8 @@ Production hardening and release engineering.
   stream teeing, the wrapper, the standalone gateway, and the `ps`, `inspect`,
   and `kill` commands.
 
-[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/sylvester-francis/leash/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sylvester-francis/leash/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sylvester-francis/leash/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sylvester-francis/leash/releases/tag/v0.1.0
