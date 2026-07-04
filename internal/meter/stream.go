@@ -98,16 +98,24 @@ func (m *StreamMeter) parseLine(line []byte) {
 	}
 }
 
-// openAIChunk is one OpenAI streaming chunk. The usage-bearing final chunk (sent
-// only when stream_options.include_usage is set) has an empty choices array.
+// openAIChunk is one OpenAI streaming event in either wire shape. For
+// chat/completions the usage-bearing final chunk (sent only when
+// stream_options.include_usage is set) has an empty choices array. For the
+// Responses API, Type names a typed event: response.output_text.delta carries a
+// text delta and response.completed carries the final usage.
 type openAIChunk struct {
+	Type    string `json:"type"`
 	Model   string `json:"model"`
 	Choices []struct {
 		Delta struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
-	Usage *openAIUsage `json:"usage"`
+	Usage    *openAIUsage `json:"usage"`
+	Response struct {
+		Model string       `json:"model"`
+		Usage *openAIUsage `json:"usage"`
+	} `json:"response"`
 }
 
 func (m *StreamMeter) parseOpenAIData(data []byte) {
@@ -118,14 +126,34 @@ func (m *StreamMeter) parseOpenAIData(data []byte) {
 	if c.Model != "" {
 		m.model = c.Model
 	}
+	if c.Response.Model != "" {
+		m.model = c.Response.Model
+	}
 	for _, ch := range c.Choices {
 		m.text.WriteString(ch.Delta.Content)
 	}
-	if c.Usage != nil {
+	if c.Type == "response.output_text.delta" {
+		// The Responses text delta is a bare string field named "delta"; decode
+		// it separately since the chat shape uses delta as an object.
+		var e struct {
+			Delta string `json:"delta"`
+		}
+		if json.Unmarshal(data, &e) == nil {
+			m.text.WriteString(e.Delta)
+		}
+	}
+	m.applyOpenAIUsage(c.Usage)
+	m.applyOpenAIUsage(c.Response.Usage)
+}
+
+// applyOpenAIUsage records a usage block when it carries recognized fields.
+func (m *StreamMeter) applyOpenAIUsage(u *openAIUsage) {
+	if u == nil {
+		return
+	}
+	if in, out, reasoning, present := u.normalize(); present {
 		m.hasUsage = true
-		m.input = c.Usage.PromptTokens
-		m.output = c.Usage.CompletionTokens
-		m.reasoning = c.Usage.CompletionTokensDetails.ReasoningTokens
+		m.input, m.output, m.reasoning = in, out, reasoning
 	}
 }
 
@@ -155,19 +183,19 @@ func (m *StreamMeter) parseAnthropicData(data []byte) {
 		if e.Message.Model != "" {
 			m.model = e.Message.Model
 		}
-		if e.Message.Usage != nil {
+		if e.Message.Usage != nil && e.Message.Usage.present() {
 			m.hasUsage = true
-			m.input = e.Message.Usage.InputTokens
-			m.output = e.Message.Usage.OutputTokens
+			m.input = deref(e.Message.Usage.InputTokens)
+			m.output = deref(e.Message.Usage.OutputTokens)
 		}
 	case "content_block_delta":
 		if e.Delta.Type == "text_delta" {
 			m.text.WriteString(e.Delta.Text)
 		}
 	case "message_delta":
-		if e.Usage != nil {
+		if e.Usage != nil && e.Usage.present() {
 			m.hasUsage = true
-			m.output = e.Usage.OutputTokens // Anthropic reports cumulative output.
+			m.output = deref(e.Usage.OutputTokens) // Anthropic reports cumulative output.
 		}
 	}
 }

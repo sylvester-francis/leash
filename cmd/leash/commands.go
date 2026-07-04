@@ -97,6 +97,20 @@ func parsePositional(fs *flag.FlagSet, args []string) (string, error) {
 	return pos, nil
 }
 
+// parseBlindPolicy maps the --on-blind flag to a proxy.BlindPolicy.
+func parseBlindPolicy(s string) (proxy.BlindPolicy, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "refuse", "":
+		return proxy.BlindRefuse, nil
+	case "warn":
+		return proxy.BlindWarn, nil
+	case "allow":
+		return proxy.BlindAllow, nil
+	default:
+		return 0, fmt.Errorf("invalid --on-blind %q (want refuse, warn, or allow)", s)
+	}
+}
+
 // parseUpstream validates an --upstream override, returning nil when unset.
 func parseUpstream(s string) (*url.URL, error) {
 	if s == "" {
@@ -164,6 +178,12 @@ func cmdRun(args []string) int {
 	}
 	defer l.Close()
 
+	onBlind, err := parseBlindPolicy(c.onBlind)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
+		return 2
+	}
+
 	p, err := proxy.New(proxy.Config{
 		Ledger:                l,
 		Governor:              g,
@@ -172,6 +192,7 @@ func cmdRun(args []string) int {
 		Inject:                !c.noInject,
 		MaxBodyBytes:          c.maxBodyBytes,
 		UpstreamHeaderTimeout: c.upstreamHeaderTimeout,
+		OnBlind:               onBlind,
 		Logger:                logger,
 	})
 	if err != nil {
@@ -218,6 +239,11 @@ func cmdServe(args []string) int {
 	}
 
 	authTokens := strings.Fields(*authToken)
+	onBlind, err := parseBlindPolicy(c.onBlind)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
+		return 2
+	}
 
 	g, limits, prices, err := buildGovernor(c)
 	if err != nil {
@@ -273,6 +299,7 @@ func cmdServe(args []string) int {
 		RequireRunID:          *requireRunID,
 		AuthTokens:            authTokens,
 		MaxRuns:               *maxRuns,
+		OnBlind:               onBlind,
 		Logger:                logger,
 		Observer:              observers,
 	}, *standby, standbyRetryInterval, logger)

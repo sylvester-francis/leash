@@ -128,6 +128,7 @@ type commonFlags struct {
 	upstreamHeaderTimeout time.Duration
 	logLevel              string
 	logFormat             string
+	onBlind               string
 }
 
 // registerCommon binds the shared flags with their documented defaults.
@@ -149,6 +150,8 @@ func registerCommon(fs *flag.FlagSet) *commonFlags {
 		"how long the upstream may take to send response headers (0 disables; the body stream is never capped)")
 	fs.StringVar(&c.logLevel, "log-level", envStr("LEASH_LOG_LEVEL", "info"), "log level: debug, info, warn, or error")
 	fs.StringVar(&c.logFormat, "log-format", envStr("LEASH_LOG_FORMAT", "text"), "log format: text or json")
+	fs.StringVar(&c.onBlind, "on-blind", envStr("LEASH_ON_BLIND", "refuse"),
+		"when a call can't be metered under a cost budget: refuse (fail closed), warn, or allow")
 	return c
 }
 

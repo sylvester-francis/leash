@@ -7,6 +7,26 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+Following an adversarial architecture review, this release closes the
+metering-integrity gaps. It is the first release to change default behavior.
+
+### Changed (breaking)
+- **Fail closed on unmeterable calls.** When a cost budget is active and leash
+  cannot meter a call, it now refuses by default instead of forwarding it at $0.
+  An unrecognized endpoint is rejected with 402; a known-provider call that
+  returns unreadable usage stops the run (reason `meter_blind`). Restore the old
+  behavior with `--on-blind=warn` (or `allow`). Set via `LEASH_ON_BLIND`.
+
+### Fixed
+- **Metering evasion / silent $0.** A usage block shaped for a different provider
+  (e.g. an OpenAI body mis-tagged Anthropic via an `Anthropic-Version` header) is
+  now treated as blind, not a real zero. The OpenAI Responses API (`/responses`,
+  `input_tokens`/`output_tokens`, `output[]` text) is now metered instead of
+  recording $0. `Unknown`-provider forwarded calls are flagged blind.
+- **Client-disconnect metering bypass.** The call record is written with a
+  detached context, so a client that drops the connection mid-stream can no
+  longer prevent the call from being metered.
+
 ### Added
 - Optional proxy authentication: `serve --auth-token` (prefer `LEASH_AUTH_TOKEN`)
   requires a matching `X-Leash-Token` header, compared in constant time and never

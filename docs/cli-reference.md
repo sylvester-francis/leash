@@ -46,6 +46,14 @@ the kill switch is always active.
 | `--upstream-header-timeout` | duration | `5m` | how long the upstream may take to send response headers; `0` disables; the body stream is never capped |
 | `--log-level` | string | `info` | `debug`, `info`, `warn`, or `error` |
 | `--log-format` | string | `text` | `text` or `json` |
+| `--on-blind` | string | `refuse` | when a call can't be metered under a cost budget: `refuse` (fail closed), `warn`, or `allow` |
+
+When a cost budget is active and leash cannot meter a call - an unrecognized
+endpoint, or a response whose usage it cannot read - `--on-blind` decides what
+happens. The default `refuse` fails closed: an unmeterable endpoint is rejected
+with 402 before it is forwarded, and a run whose forwarded call comes back
+unmeterable is stopped (reason `meter_blind`) so no further spend goes uncounted.
+`warn` forwards and warns once per run; `allow` forwards silently.
 
 A run id (the `--run` flag and the `X-Loop-Id` header) must match
 `^[A-Za-z0-9][A-Za-z0-9._-]{0,117}$`. An invalid `--run` exits 1; an invalid
@@ -138,7 +146,9 @@ A refused call returns HTTP 429 with:
 ```
 
 `reason` is one of `kill_switch`, `deadline`, `cost_budget`, `max_calls`,
-`rate_limit`, `stall`. Every later call for a stopped run returns the same body.
+`rate_limit`, `stall`, or `meter_blind` (a call could not be metered under a cost
+budget with `--on-blind=refuse`). Every later call for a stopped run returns the
+same body.
 
 ## The stop line
 
