@@ -18,6 +18,7 @@
 package term
 
 import (
+	"io"
 	"os"
 )
 
@@ -27,7 +28,6 @@ const (
 	green = "\x1b[32m"
 	amber = "\x1b[33m"
 	red   = "\x1b[31m"
-	dim   = "\x1b[2m"
 )
 
 // Painter wraps text in ANSI color when enabled, and passes it through
@@ -36,7 +36,7 @@ type Painter struct{ on bool }
 
 // NewPainter returns a Painter enabled when w is a terminal and NO_COLOR is
 // unset. A non-*os.File writer (a buffer, a pipe) yields a disabled painter.
-func NewPainter(w any) Painter {
+func NewPainter(w io.Writer) Painter {
 	f, ok := w.(*os.File)
 	if !ok {
 		return Painter{}
@@ -50,9 +50,6 @@ func NewPainter(w any) Painter {
 	}
 	return Painter{on: info.Mode()&os.ModeCharDevice != 0}
 }
-
-// Enabled reports whether the painter colors its output.
-func (p Painter) Enabled() bool { return p.on }
 
 func (p Painter) paint(code, s string) string {
 	if !p.on {
@@ -69,9 +66,6 @@ func (p Painter) Amber(s string) string { return p.paint(amber, s) }
 
 // Red colors s red (a killed state).
 func (p Painter) Red(s string) string { return p.paint(red, s) }
-
-// Dim renders s dimmed.
-func (p Painter) Dim(s string) string { return p.paint(dim, s) }
 
 // Status colors a run status word: running green, stopped amber, killed red,
 // anything else unchanged.

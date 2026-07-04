@@ -157,9 +157,9 @@ func sortedKeys(m map[string]int64) []string {
 	return keys
 }
 
-// escapeLabel escapes a Prometheus label value (backslash, quote, newline). Only
-// the build-supplied version string needs it; the other labels are fixed enums.
-func escapeLabel(v string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
-	return r.Replace(v)
-}
+// labelEscaper escapes a Prometheus label value: backslash, quote, newline.
+var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
+// escapeLabel escapes a Prometheus label value. Only the build-supplied version
+// string needs it; the other labels are fixed enums.
+func escapeLabel(v string) string { return labelEscaper.Replace(v) }

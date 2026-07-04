@@ -22,25 +22,28 @@ import (
 	"testing"
 )
 
+// plain reports whether the painter leaves text unchanged (color disabled).
+func plain(p Painter) bool { return p.Green("x") == "x" }
+
 func TestNewPainterDisabledForNonTTY(t *testing.T) {
-	if NewPainter(&bytes.Buffer{}).Enabled() {
-		t.Fatalf("painter enabled for a bytes.Buffer, want disabled")
+	if !plain(NewPainter(&bytes.Buffer{})) {
+		t.Fatalf("painter colored a bytes.Buffer, want plain")
 	}
 	f, err := os.Create(filepath.Join(t.TempDir(), "out"))
 	if err != nil {
 		t.Fatalf("temp file: %v", err)
 	}
 	defer f.Close()
-	if NewPainter(f).Enabled() {
-		t.Fatalf("painter enabled for a regular file, want disabled")
+	if !plain(NewPainter(f)) {
+		t.Fatalf("painter colored a regular file, want plain")
 	}
 }
 
 func TestNoColorDisables(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	// Even for stdout, NO_COLOR forces plain.
-	if NewPainter(os.Stdout).Enabled() {
-		t.Fatalf("painter enabled with NO_COLOR set, want disabled")
+	if !plain(NewPainter(os.Stdout)) {
+		t.Fatalf("painter colored with NO_COLOR set, want plain")
 	}
 }
 

@@ -554,13 +554,24 @@ func writeBoundary(w http.ResponseWriter, s *policy.State) {
 	_ = json.NewEncoder(w).Encode(b)
 }
 
+// gatewayBody is the JSON leash returns for a proxy-level failure (413, 400,
+// 5xx), mirroring boundaryBody's shape.
+type gatewayBody struct {
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 // writeGatewayError writes a small JSON error for proxy-level failures.
 func (p *Proxy) writeGatewayError(w http.ResponseWriter, status int, msg string) {
+	var b gatewayBody
+	b.Error.Type = "leash_gateway"
+	b.Error.Message = msg
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{"type": "leash_gateway", "message": msg},
-	})
+	_ = json.NewEncoder(w).Encode(b)
 }
 
 // round2 rounds a dollar amount to the cent for reporting.

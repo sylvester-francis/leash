@@ -5,9 +5,12 @@ GO ?= go
 BINARY := leash
 PKG := ./...
 
-.PHONY: all build vet test race cover mutate fuzz bench ascii-check doc-check docker tidy fmt clean
+.PHONY: all build vet test race cover mutate fuzz bench lint ascii-check doc-check docker tidy fmt clean
 
-all: build vet test ascii-check doc-check
+# Pinned so CI and local runs agree; staticcheck is a tool, not a module dep.
+STATICCHECK_VERSION ?= 2026.1
+
+all: build vet lint test ascii-check doc-check
 
 build:
 	$(GO) build $(PKG)
@@ -15,6 +18,14 @@ build:
 
 vet:
 	$(GO) vet $(PKG)
+
+# Static analysis and formatting gate: gofmt must be clean and staticcheck must
+# pass with all checks (bugs, style, simplifications).
+lint:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi; \
+	echo "gofmt: ok"
+	$(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) -checks=all $(PKG)
 
 test:
 	$(GO) test $(PKG)
