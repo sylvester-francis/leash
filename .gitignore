@@ -22,3 +22,6 @@ coverage.out
 
 # GoReleaser build output.
 /dist/
+
+# Example/user price tables should not be committed
+prices.json

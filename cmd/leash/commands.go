@@ -151,7 +151,6 @@ func cmdRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 2
 	}
-	warnIfBlind(c, limits, prices)
 
 	upstream, err := parseUpstream(c.upstream)
 	if err != nil {
@@ -169,6 +168,7 @@ func cmdRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 2
 	}
+	warnIfBlind(logger, c, limits, prices)
 
 	l, err := ledger.Open(c.db)
 	if err != nil {
@@ -272,7 +272,6 @@ func cmdServe(args []string) int {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 2
 	}
-	warnIfBlind(c, limits, prices)
 
 	upstream, err := parseUpstream(c.upstream)
 	if err != nil {
@@ -292,6 +291,7 @@ func cmdServe(args []string) int {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
 		return 2
 	}
+	warnIfBlind(logger, c, limits, prices)
 	if upstream != nil && upstream.Scheme == "http" {
 		logger.Warn("upstream is plain http; the client credential is forwarded in cleartext", "upstream", upstream.Redacted())
 	}

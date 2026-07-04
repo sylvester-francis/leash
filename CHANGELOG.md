@@ -25,6 +25,10 @@ metering-integrity gaps. It is the first release to change default behavior.
   behavior with `--on-blind=warn` (or `allow`). Set via `LEASH_ON_BLIND`.
 
 ### Fixed
+- The blind-meter warning now goes through the structured logger, so it no longer
+  emits a stray non-JSON line under `--log-format json`.
+- Removed a stray `prices.json` demo artifact from the repository root and
+  gitignored it (price tables are user-supplied and should not be committed).
 - **Unbounded in-memory growth.** Idle runs are now evicted whether or not they
   have stopped (a running-but-idle run, or a rotated `X-Loop-Id`, was never
   freed), and per-run rate samples are pruned to the rate window (and not kept at
