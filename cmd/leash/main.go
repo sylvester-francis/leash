@@ -61,6 +61,8 @@ func dispatch(args []string) int {
 		return cmdRun(args[1:])
 	case "version", "--version":
 		return cmdVersion()
+	case "gen-token":
+		return cmdGenToken()
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 		return 0
@@ -76,6 +78,19 @@ func cmdVersion() int {
 	return 0
 }
 
+// cmdGenToken prints a cryptographically strong token for --auth-token, so an
+// operator does not have to invent one. Feed it to the server as LEASH_AUTH_TOKEN
+// and to clients as the X-Leash-Token header.
+func cmdGenToken() int {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		fmt.Fprintf(os.Stderr, "leash: generate token: %v\n", err)
+		return 1
+	}
+	fmt.Println(hex.EncodeToString(b[:]))
+	return 0
+}
+
 // usage prints the top-level help.
 func usage(w *os.File) {
 	fmt.Fprint(w, `leash - durable agent spend governor
@@ -87,6 +102,7 @@ Usage:
   leash inspect [--json] <run>           show one run's folded journal
   leash kill <run>                       durably stop a run on its next call
   leash version                          print the build version
+  leash gen-token                        print a random token for --auth-token
 
 Flags are per-subcommand (pass -h after a subcommand); see the README for the full list.
 Every shared flag also reads a LEASH_-prefixed environment variable (for example

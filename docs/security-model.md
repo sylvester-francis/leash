@@ -5,21 +5,34 @@ plainly so an operator can place leash correctly in a network.
 
 ## The trust boundary
 
-leash assumes a trusted network segment between the agent and the proxy. There
-is no auth layer on the proxy by design: access control is the network's job.
-Anyone who can reach the listener can spend under any run id, and can pool into
-the `default` run if untagged traffic is allowed. Place the listener where only
-the agents you intend to govern can reach it.
+By default leash trusts the network segment between the agent and the proxy:
+with no token configured, anyone who can reach the listener can spend under any
+run id. Do not rely on that alone on an untrusted network.
 
 Mitigations, in order of leverage:
 
+- **Authenticate.** `--auth-token` (prefer the `LEASH_AUTH_TOKEN` environment
+  variable so the secret stays out of the process list) requires every request
+  to carry a matching `X-Leash-Token` header, so reaching the listener is not
+  enough to spend. The token is compared in constant time and never logged or
+  forwarded upstream. Generate a strong one with `leash gen-token`. leash does
+  not authenticate identities per caller - that belongs at an ingress or service
+  mesh (mTLS, OIDC) in front of leash, which it composes with.
+- **Rotate the token.** It is a static shared secret with no expiry; rotate it
+  periodically and on any suspected leak. Configure two tokens (space-separated)
+  for a zero-downtime overlap: accept the old and new token, roll clients to the
+  new one, then drop the old.
+- **Bound the blast radius.** `--max-runs` caps the number of runs tracked in
+  memory at once; a new run beyond the cap is refused 503, so a flood of run ids
+  cannot exhaust memory or the ledger.
 - `--require-run-id` refuses any request without an `X-Loop-Id`, closing the
   shared-gateway footgun where one stopped `default` run would 429 all untagged
   traffic, or where untagged traffic pools into one budget by accident.
 - Network ACLs (security groups, firewall rules, a private subnet) that limit who
   can reach the proxy listener.
-- Put the `--admin` listener on a separate address and segment from the proxy, so
-  health and metrics are not reachable from wherever the proxy is.
+- Put the `--admin` listener on a separate address and segment from the proxy;
+  when a token is set, `/metrics` requires it too, while `/healthz` and `/readyz`
+  stay open for orchestrator probes.
 
 ## Secrets and data at rest
 

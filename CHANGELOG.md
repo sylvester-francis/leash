@@ -8,6 +8,13 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 ## [Unreleased]
 
 ### Added
+- Optional proxy authentication: `serve --auth-token` (prefer `LEASH_AUTH_TOKEN`)
+  requires a matching `X-Leash-Token` header, compared in constant time and never
+  logged or forwarded. Space-separate two tokens for zero-downtime rotation.
+  `leash gen-token` prints a strong random token, and `--admin` `/metrics`
+  requires the token when one is set.
+- `serve --max-runs` caps the runs tracked in memory at once; a new run beyond
+  the cap is refused 503, bounding a run-id-flood DoS.
 - Per-subcommand `-h` help with a synopsis and examples.
 - TTY-aware color for run status in `ps` and `inspect` and for the stop line
   (green running, amber stopped, red killed). It honors `NO_COLOR` and

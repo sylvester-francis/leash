@@ -59,10 +59,11 @@ var hopByHopHeaders = map[string]bool{
 	"upgrade":             true,
 }
 
-// leashInternalHeaders are leash's own routing headers; they are consumed here
-// and not sent upstream.
+// leashInternalHeaders are leash's own routing and auth headers; they are
+// consumed here and not sent upstream.
 var leashInternalHeaders = map[string]bool{
-	"x-loop-id": true,
+	"x-loop-id":     true,
+	"x-leash-token": true,
 }
 
 // copyRequestHeader copies client request headers to the upstream request. It

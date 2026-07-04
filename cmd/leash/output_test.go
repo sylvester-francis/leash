@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -122,6 +123,26 @@ func TestInspectJSON(t *testing.T) {
 	}
 	if got.Entries[0].InputTokens != 42 {
 		t.Fatalf("inspect --json entry input = %d, want 42", got.Entries[0].InputTokens)
+	}
+}
+
+func TestGenToken(t *testing.T) {
+	out := captureStdout(t, func() {
+		if code := dispatch([]string{"gen-token"}); code != 0 {
+			t.Fatalf("gen-token exit = %d, want 0", code)
+		}
+	})
+	tok := strings.TrimSpace(out)
+	if len(tok) != 64 { // 32 random bytes, hex-encoded
+		t.Fatalf("gen-token length = %d, want 64 hex chars", len(tok))
+	}
+	if _, err := hex.DecodeString(tok); err != nil {
+		t.Fatalf("gen-token is not hex: %v", err)
+	}
+	// Two calls must differ (it is random, not a constant).
+	out2 := captureStdout(t, func() { dispatch([]string{"gen-token"}) })
+	if strings.TrimSpace(out2) == tok {
+		t.Fatalf("gen-token returned the same value twice; it must be random")
 	}
 }
 

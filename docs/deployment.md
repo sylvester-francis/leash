@@ -168,6 +168,8 @@ from the flag. An explicit flag beats the environment beats the default.
 | `LEASH_ADMIN` | `--admin` |
 | `LEASH_STANDBY` | `--standby` |
 | `LEASH_REQUIRE_RUN_ID` | `--require-run-id` |
+| `LEASH_AUTH_TOKEN` | `--auth-token` (preferred, keeps the secret out of the process list) |
+| `LEASH_MAX_RUNS` | `--max-runs` |
 | `LEASH_MAX_COST` | `--max-cost` |
 | `LEASH_MAX_CALLS` | `--max-calls` |
 | `LEASH_DEADLINE` | `--deadline` |

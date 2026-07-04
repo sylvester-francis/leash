@@ -13,6 +13,7 @@ leash ps [flags] [--json]              list active runs from the ledger
 leash inspect [flags] [--json] <run>   show one run's folded journal
 leash kill [flags] <run>               durably stop a run on its next call
 leash version                          print the build version
+leash gen-token                        print a random token for --auth-token
 leash help                             top-level help
 ```
 
@@ -58,6 +59,8 @@ header gets 400.
 | `--require-run-id` | bool | `false` | refuse a request with no `X-Loop-Id` (400) instead of pooling it into `default` |
 | `--admin` | address | off | admin listener for `/healthz`, `/readyz`, `/metrics`; empty disables |
 | `--standby` | bool | `false` | wait for the governance lease instead of erroring when another instance holds it (active/passive HA) |
+| `--auth-token` | string | off | require a matching `X-Leash-Token` header; space-separate two for zero-downtime rotation; prefer `LEASH_AUTH_TOKEN` |
+| `--max-runs` | int | `0` | cap on runs tracked in memory at once; a new run beyond it is refused 503 (0 disables) |
 
 `ps` and `inspect` accept the governance flags too, so `--db`, `--prices`, and
 `--compute-rate` let them compute and display costs, and both take `--json`.
