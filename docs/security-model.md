@@ -97,6 +97,39 @@ so a patched Go toolchain is picked up automatically. Release binaries are
 CGO-free static builds with reproducible `-trimpath` flags, published with a
 `checksums.txt`.
 
+## Verifying a release
+
+Every release is keyless-signed with [cosign](https://github.com/sigstore/cosign)
+(the signer identity is the GitHub Actions workflow, recorded in the Rekor
+transparency log; there is no private key), ships a CycloneDX SBOM per archive,
+and carries a SLSA build-provenance attestation. No secret material is involved,
+so anyone can verify the chain end to end.
+
+**Binaries.** Download `checksums.txt`, `checksums.txt.sig`, and
+`checksums.txt.pem` from the release, then verify the signature over the checksums
+(which vouches for every archive it lists) and provenance for your archive:
+
+```sh
+cosign verify-blob \
+  --certificate checksums.txt.pem --signature checksums.txt.sig \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp 'https://github.com/sylvester-francis/leash/.github/workflows/release.yml@.*' \
+  checksums.txt
+sha256sum -c checksums.txt --ignore-missing   # check your downloaded archive
+
+gh attestation verify leash_0.2.2_linux_amd64.tar.gz --repo sylvester-francis/leash
+```
+
+**Container image.** Verify the signature and provenance by tag or digest:
+
+```sh
+cosign verify ghcr.io/sylvester-francis/leash:0.2.2 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp 'https://github.com/sylvester-francis/leash/.github/workflows/docker-publish.yml@.*'
+
+gh attestation verify oci://ghcr.io/sylvester-francis/leash:0.2.2 --repo sylvester-francis/leash
+```
+
 ## Hardening checklist
 
 - Set `--require-run-id` on a shared gateway.

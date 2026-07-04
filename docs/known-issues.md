@@ -47,21 +47,15 @@ current releases, not overlooked. Each is tracked as a GitHub issue under the
 - **Hierarchical multi-tenant quotas** ([#21](https://github.com/sylvester-francis/leash/issues/21)).
   Budgets are per run (per credential when auth is on). A quota that nests
   call < run < team < org, with limits at each level, is not modeled yet.
-- **Soft limits and backpressure** ([#22](https://github.com/sylvester-francis/leash/issues/22)).
-  Boundaries are a hard 429 cliff. Warn thresholds, `Retry-After` / queueing, and
-  approach-to-budget webhooks or alerts are not built; the run-scoped observer
-  channel they need is intentionally absent today.
-- **Richer observability** ([#23](https://github.com/sylvester-francis/leash/issues/23)).
-  The metrics are counters and gauges. A request-latency histogram, an in-flight
-  gauge, status-class counters, and request-id / trace propagation are not yet
-  exported.
-- **Release supply chain** ([#25](https://github.com/sylvester-francis/leash/issues/25)).
-  Binaries and the image are published with checksums but are not yet
-  cosign-signed, and ship no SBOM or SLSA provenance.
 
 Two of the limitations above are also tracked for a fix: the Windows SQLite lock
-([#24](https://github.com/sylvester-francis/leash/issues/24)) and the append
+([#25](https://github.com/sylvester-francis/leash/issues/25)) and the append
 idempotency edge case ([#26](https://github.com/sylvester-francis/leash/issues/26)).
+
+Soft limits and backpressure ([#22](https://github.com/sylvester-francis/leash/issues/22)),
+richer observability ([#23](https://github.com/sylvester-francis/leash/issues/23)),
+and a signed release supply chain ([#24](https://github.com/sylvester-francis/leash/issues/24))
+have since shipped; see [security-model.md](security-model.md) for verifying a release.
 
 Have a use case that one of these blocks? Comment on the issue - it helps
 prioritize.
