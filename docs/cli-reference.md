@@ -183,6 +183,13 @@ array of the decoded journal:
 `status` is `running`, `killed`, or `stopped`; `reason` is empty until a boundary
 stops the run.
 
+## Color
+
+`ps`, `inspect`, and the stop line color the run status when standard output (or
+stderr, for the stop line) is a terminal: running is green, stopped is amber,
+killed is red. Color is off for pipes, redirects, and `--json`, and honors the
+`NO_COLOR` environment variable.
+
 ## The admin listener
 
 When `serve --admin ADDR` is set, a second HTTP server on `ADDR` serves:

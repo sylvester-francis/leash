@@ -25,6 +25,8 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -32,6 +34,7 @@ import (
 	"github.com/sylvester-francis/leash/internal/ledger"
 	"github.com/sylvester-francis/leash/internal/policy"
 	"github.com/sylvester-francis/leash/internal/proxy"
+	"github.com/sylvester-francis/leash/internal/term"
 	"github.com/sylvester-francis/leash/internal/wrap"
 )
 
@@ -53,6 +56,24 @@ func acquireProxy(cfg proxy.Config, standby bool, retry time.Duration, logger *s
 		}
 		logger.Info("ledger governed by another instance; standing by", "retry", retry.String())
 		time.Sleep(retry)
+	}
+}
+
+// setUsage installs a richer -h/--help for a subcommand: a one-line synopsis,
+// the usage line, examples, then the flag defaults.
+func setUsage(fs *flag.FlagSet, synopsis, usage string, examples ...string) {
+	fs.Usage = func() {
+		w := fs.Output()
+		fmt.Fprintf(w, "%s\n\nUsage:\n  %s\n\n", synopsis, usage)
+		if len(examples) > 0 {
+			fmt.Fprintln(w, "Examples:")
+			for _, e := range examples {
+				fmt.Fprintf(w, "  %s\n", e)
+			}
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintln(w, "Flags:")
+		fs.PrintDefaults()
 	}
 }
 
@@ -95,6 +116,10 @@ func parseUpstream(s string) (*url.URL, error) {
 func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("leash", flag.ContinueOnError)
 	c := registerCommon(fs)
+	setUsage(fs, "leash - wrap a command under the spend governor (Tier 1).",
+		"leash [flags] -- <command> [args...]",
+		"leash --max-cost 5 --deadline 15m --prices prices.json -- python agent.py",
+		"leash --max-calls 500 --rate 200000/1m --stall 4 -- ./agent.sh")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -180,6 +205,10 @@ func cmdServe(args []string) int {
 		"address for the admin listener serving /healthz, /readyz, /metrics (empty disables)")
 	standby := fs.Bool("standby", envBool("LEASH_STANDBY", false),
 		"wait for the governance lease instead of erroring when another instance holds it (active/passive HA)")
+	setUsage(fs, "leash serve - run the standalone governor gateway (Tier 2).",
+		"leash serve [flags]",
+		"leash serve --listen :8088 --max-cost 20 --prices prices.json",
+		"leash serve --admin :9090 --require-run-id --db postgres://user:pass@host/leash --standby")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -211,9 +240,13 @@ func cmdServe(args []string) int {
 	}
 
 	// The stop line is printed straight to stderr (not through the structured
-	// logger) so it keeps its exact human-readable "leash: stopped run ..." form.
+	// logger) so it keeps its exact human-readable "leash: stopped run ..." form,
+	// colored by boundary reason when stderr is a terminal.
+	stopPaint := term.NewPainter(os.Stderr)
 	observers := proxy.MultiObserver{
-		proxy.StopLineObserver(func(s *policy.State) { fmt.Fprintln(os.Stderr, policy.StopLine(s)) }),
+		proxy.StopLineObserver(func(s *policy.State) {
+			fmt.Fprintln(os.Stderr, stopPaint.StopReasonColor(policy.StopLine(s), s.StopReason))
+		}),
 	}
 	var metrics *proxy.Metrics
 	if *admin != "" {
@@ -281,6 +314,10 @@ func cmdPs(args []string) int {
 	fs := flag.NewFlagSet("leash ps", flag.ContinueOnError)
 	c := registerCommon(fs)
 	asJSON := fs.Bool("json", false, "emit a stable JSON array instead of a human table")
+	setUsage(fs, "leash ps - list active runs from the ledger.",
+		"leash ps [flags]",
+		"leash ps",
+		"leash ps --json --db ./team.db")
 	if err := fs.Parse(args); err != nil {
 		return flagExit(err)
 	}
@@ -321,14 +358,74 @@ func cmdPs(args []string) int {
 		fmt.Println("leash: no active runs")
 		return 0
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tCALLS\tTOKENS$\tCOMPUTE$\tTOTAL$\tSTATUS\tREASON")
-	for _, s := range summaries {
-		fmt.Fprintf(tw, "%s\t%d\t%.2f\t%.2f\t%.2f\t%s\t%s\n",
-			s.Run, s.Calls, s.TokenCost, s.ComputeCost, s.TotalCost, s.Status, s.Reason)
-	}
-	_ = tw.Flush()
+	printRunTable(os.Stdout, summaries)
 	return 0
+}
+
+// printRunTable prints the ps table with visible-width alignment and a colored
+// status column. Padding is computed on the plain text, so the ANSI codes never
+// throw off column widths; color auto-disables off a terminal.
+func printRunTable(w *os.File, rows []runJSON) {
+	p := term.NewPainter(w)
+	headers := []string{"RUN", "CALLS", "TOKENS$", "COMPUTE$", "TOTAL$", "STATUS", "REASON"}
+	const statusCol = 5
+	cells := make([][]string, len(rows))
+	for i, s := range rows {
+		cells[i] = []string{
+			s.Run, strconv.FormatInt(s.Calls, 10),
+			fmt.Sprintf("%.2f", s.TokenCost), fmt.Sprintf("%.2f", s.ComputeCost),
+			fmt.Sprintf("%.2f", s.TotalCost), s.Status, s.Reason,
+		}
+	}
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len(h)
+	}
+	for _, row := range cells {
+		for i, c := range row {
+			if len(c) > widths[i] {
+				widths[i] = len(c)
+			}
+		}
+	}
+
+	var b strings.Builder
+	writeRow := func(row []string, color bool) {
+		for i, c := range row {
+			last := i == len(row)-1
+			pad := c
+			if !last {
+				pad = fmt.Sprintf("%-*s", widths[i], c)
+			}
+			if color && i == statusCol {
+				pad = colorStatus(p, c, pad)
+			}
+			b.WriteString(pad)
+			if !last {
+				b.WriteString("  ")
+			}
+		}
+		b.WriteByte('\n')
+	}
+	writeRow(headers, false)
+	for i := range cells {
+		writeRow(cells[i], true)
+	}
+	fmt.Fprint(w, b.String())
+}
+
+// colorStatus colors a padded status cell by its status word.
+func colorStatus(p term.Painter, status, cell string) string {
+	switch status {
+	case "running":
+		return p.Green(cell)
+	case "stopped":
+		return p.Amber(cell)
+	case "killed":
+		return p.Red(cell)
+	default:
+		return cell
+	}
 }
 
 // encodeJSON writes v as indented JSON to stdout, returning a CLI exit code.
@@ -359,6 +456,10 @@ func cmdInspect(args []string) int {
 	fs := flag.NewFlagSet("leash inspect", flag.ContinueOnError)
 	c := registerCommon(fs)
 	asJSON := fs.Bool("json", false, "emit a stable JSON object instead of a human report")
+	setUsage(fs, "leash inspect - show one run's folded journal.",
+		"leash inspect [flags] <run>",
+		"leash inspect nightly-42",
+		"leash inspect --json nightly-42 --db ./team.db")
 	runID, err := parsePositional(fs, args)
 	if err != nil {
 		return flagExit(err)
@@ -406,7 +507,8 @@ func cmdInspect(args []string) int {
 		return 0
 	}
 
-	fmt.Printf("run %s  status %s  calls %d\n", runID, runStatus(s), s.Calls)
+	pt := term.NewPainter(os.Stdout)
+	fmt.Printf("run %s  status %s  calls %d\n", runID, pt.Status(runStatus(s)), s.Calls)
 	fmt.Printf("cost   $%.2f tokens + $%.2f compute = $%.2f\n", s.TokenCost, s.ComputeCost, s.TotalCost)
 	fmt.Printf("tokens in %d  out %d  reasoning %d\n\n", s.InputTokens, s.OutputTokens, s.ReasoningTokens)
 
@@ -438,6 +540,10 @@ func entryDetail(e ledger.Entry) string {
 func cmdKill(args []string) int {
 	fs := flag.NewFlagSet("leash kill", flag.ContinueOnError)
 	db := fs.String("db", envStr("LEASH_DB", defaultDBPath()), "ledger database path")
+	setUsage(fs, "leash kill - durably stop a run on its next call.",
+		"leash kill [flags] <run>",
+		"leash kill nightly-42",
+		"leash kill nightly-42 --db ./team.db")
 	runID, err := parsePositional(fs, args)
 	if err != nil {
 		return flagExit(err)

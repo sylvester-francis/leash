@@ -8,6 +8,10 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 ## [Unreleased]
 
 ### Added
+- Per-subcommand `-h` help with a synopsis and examples.
+- TTY-aware color for run status in `ps` and `inspect` and for the stop line
+  (green running, amber stopped, red killed). It honors `NO_COLOR` and
+  auto-disables for pipes, redirects, and `--json`.
 - A workflow publishing the distroless image to GHCR
   (`ghcr.io/sylvester-francis/leash`) on each release tag.
 
