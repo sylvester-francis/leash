@@ -7,6 +7,14 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Added
+- Signed release supply chain. Release binaries are keyless-signed with cosign
+  (a signature over `checksums.txt`, no private key), ship a CycloneDX SBOM per
+  archive, and carry a SLSA build-provenance attestation. The container image is
+  cosign-signed by digest with its own provenance attestation. See
+  [docs/security-model.md](docs/security-model.md#verifying-a-release) for how to
+  verify a download.
+
 ## [0.2.2] - 2026-07-04
 
 ### Changed

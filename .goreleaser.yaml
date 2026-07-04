@@ -41,6 +41,27 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# A CycloneDX SBOM per archive (via syft), uploaded with the release.
+sboms:
+  - id: archive
+    artifacts: archive
+
+# Keyless cosign signature over the checksums file, which vouches for every
+# artifact it lists. No key to manage: the signer identity is the GitHub Actions
+# OIDC token (Fulcio certificate + Rekor transparency log).
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 
