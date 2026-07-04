@@ -1,3 +1,17 @@
+// Copyright 2026 Sylvester Francis
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package wrap is leash's Tier 1 front door: it launches a child process with
 // its provider base URLs pointed at an embedded proxy, forwards the child's
 // standard streams and signals, and after the child exits reports whether a
@@ -14,12 +28,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/sylvester-francis/leash/internal/ledger"
 	"github.com/sylvester-francis/leash/internal/policy"
+	"github.com/sylvester-francis/leash/internal/proxy"
 )
 
 // BoundaryExitCode is the exit status leash uses when a boundary stopped the
@@ -80,7 +93,10 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("wrap: listen: %w", err)
 	}
 	baseURL := "http://" + ln.Addr().String()
-	srv := &http.Server{Handler: opts.Handler}
+	// Even the embedded, loopback-only server gets the request-hardening timeouts,
+	// so the two server construction sites cannot drift; the empty address is
+	// unused because it is driven by Serve on an existing listener.
+	srv := proxy.HardenedServer("", opts.Handler)
 	go func() { _ = srv.Serve(ln) }()
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
@@ -148,30 +164,6 @@ func injectBaseURLs(env []string, baseURL string) []string {
 		"OPENAI_API_BASE="+baseURL+"/v1",
 		"ANTHROPIC_BASE_URL="+baseURL,
 	)
-}
-
-// forwardSignals relays interrupt and termination signals to the child and
-// returns a function that stops relaying.
-func forwardSignals(cmd *exec.Cmd) (stop func()) {
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case sig := <-sigCh:
-				if cmd.Process != nil {
-					_ = cmd.Process.Signal(sig)
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-	return func() {
-		signal.Stop(sigCh)
-		close(done)
-	}
 }
 
 // exitCodeFrom extracts the child's exit code. A process killed by a signal

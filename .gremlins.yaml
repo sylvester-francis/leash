@@ -1,0 +1,15 @@
+# gremlins 0.6 mutation-testing config (github.com/go-gremlins/gremlins).
+# Schema verified against gremlins 0.6.0: the threshold is a nested map under
+# the unleash command, and gremlins exits non-zero (10) when efficacy is below
+# it. Efficacy is KILLED / (KILLED + LIVED).
+#
+# The nightly mutation workflow runs this over internal/policy and
+# internal/meter (the deterministic core). Measured baseline on internal/policy:
+# 96.23 percent efficacy (Apple M4 Pro, go1.25.6).
+unleash:
+  threshold:
+    efficacy: 90
+    mcover: 0
+  # A generous timeout coefficient so each mutant has room to recompile; without
+  # it a fast suite derives a sub-second timeout and every mutant times out.
+  timeout-coefficient: 30

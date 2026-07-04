@@ -1,0 +1,46 @@
+# No-key demo: the leash gateway in front of the std-lib fake upstream, so you
+# can watch a boundary trip end to end without a real API key or any spend.
+#
+#   docker compose up --build
+#   for i in $(seq 1 6); do curl -s -XPOST localhost:8088/v1/chat/completions \
+#       -H 'X-Loop-Id: demo' -d '{"model":"demo-model"}'; echo; done
+#
+# The gateway is capped at --max-calls 5, so the sixth call returns the 429
+# leash_boundary body. Health and metrics are on the admin listener at :9090.
+services:
+  fakeupstream:
+    image: golang:1.25
+    working_dir: /src
+    volumes:
+      - .:/src:ro
+      - gocache:/go
+    command: ["go", "run", "./examples/fakeupstream", "--listen", "0.0.0.0:9099"]
+
+  leash:
+    build:
+      context: .
+    command:
+      - "serve"
+      - "--listen"
+      - "0.0.0.0:8088"
+      - "--admin"
+      - "0.0.0.0:9090"
+      - "--upstream"
+      - "http://fakeupstream:9099"
+      - "--db"
+      - "/data/leash.db"
+      - "--max-calls"
+      - "5"
+      - "--log-format"
+      - "json"
+    ports:
+      - "8088:8088"
+      - "9090:9090"
+    volumes:
+      - leash-data:/data
+    depends_on:
+      - fakeupstream
+
+volumes:
+  leash-data:
+  gocache:

@@ -1,5 +1,6 @@
 # Compiled binary and build artifacts.
 /leash
+/doccheck
 /cmd/leash/leash
 *.test
 *.out
@@ -16,5 +17,7 @@ coverage.out
 .DS_Store
 
 # Build guides are not part of the application and must not be committed.
-leash-application-build-prompt.md
-leash-teaching-module-build-prompt.md
+*-build-prompt.md
+
+# GoReleaser build output.
+/dist/

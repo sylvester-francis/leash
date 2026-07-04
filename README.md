@@ -14,7 +14,7 @@
 **Put leash in front of your agent and it stops burning money: on cost, calls, time, runaway rate, repetition, or a kill - with accounting that survives a crash, so a restart can never reset the budget and re-spend.**
 
 [![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
-[![Tests](https://img.shields.io/badge/go%20test-race-44cc11)](#testing)
+[![CI](https://github.com/sylvester-francis/leash/actions/workflows/ci.yml/badge.svg)](https://github.com/sylvester-francis/leash/actions/workflows/ci.yml)
 [![Core deps](https://img.shields.io/badge/direct%20deps-1-success)](#design)
 [![Mutation](https://img.shields.io/badge/mutation%20(core)-96%25-44cc11)](#testing)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -105,6 +105,18 @@ counts (calls, time, stall, kill).
 
 ## Install
 
+A prebuilt static binary from the [releases](https://github.com/sylvester-francis/leash/releases)
+(linux, darwin, windows on amd64 and arm64), verified against `checksums.txt`:
+
+```sh
+# adjust the version, OS, and arch:
+curl -sSL -o leash.tar.gz \
+  https://github.com/sylvester-francis/leash/releases/download/v0.1.0/leash_0.1.0_linux_amd64.tar.gz
+tar xzf leash.tar.gz && ./leash version
+```
+
+Or with the Go toolchain:
+
 ```sh
 go install github.com/sylvester-francis/leash/cmd/leash@latest
 ```
@@ -118,6 +130,19 @@ cd leash && make build   # produces ./leash
 
 leash needs Go 1.25+ and builds as a single static binary with no C toolchain
 (the SQLite ledger is pure Go via `modernc.org/sqlite`).
+
+### Docker
+
+A distroless, nonroot image; the compose file runs a no-key demo against the fake
+upstream (the gateway is capped so a boundary trips end to end):
+
+```sh
+docker run --rm -p 8088:8088 -v leash-data:/data \
+  ghcr.io/sylvester-francis/leash:latest \
+  serve --listen :8088 --db /data/leash.db --max-cost 20
+
+docker compose up --build   # from a checkout: gateway + fake upstream
+```
 
 ## The 60-second demo
 
@@ -179,6 +204,11 @@ an `X-Loop-Id` header so it gets its own durable budget:
 ```sh
 leash serve --listen :8088 --max-cost 5.00 --prices prices.json
 ```
+
+On a shared gateway, add `--require-run-id` so untagged traffic is refused rather
+than pooled into one budget, and `--admin :9090` for `/healthz`, `/readyz`, and a
+Prometheus `/metrics` endpoint on a separate listener. See
+[`docs/deployment.md`](docs/deployment.md).
 
 ## The boundaries
 
@@ -276,6 +306,28 @@ or response bodies, and Authorization and api-key headers are forwarded to the
 upstream untouched and never logged or persisted. See
 [`docs/durability.md`](docs/durability.md).
 
+Cross-process governance is available too: point `--db` at Postgres
+(`--db postgres://...`) for a real cross-process lease, and run a second instance
+with `--standby` for active/passive failover.
+
+## Performance
+
+The governor caches each run's folded state so per-call overhead does not grow
+with the journal. Measured end to end through httptest against a std-lib fake
+upstream, before and after the warm-path cache (per-call, ns/op):
+
+| pre-seeded journal | before (full reload) | after (warm cache) |
+|---|---|---|
+| 0 | 576025 | 212596 |
+| 100 | 791254 | 164784 |
+| 1000 | 2812566 | 203661 |
+| 10000 | 23445414 | 290798 |
+
+Before, per-call cost grows linearly with journal size (quadratic over a run);
+after, it is flat. Allocations at journal 10000 dropped from 283086 to 1181.
+These are synthetic and local: Apple M4 Pro, go1.25.6 darwin/arm64, measured
+numbers only. Reproduce with `make bench`.
+
 ## Metering the wire
 
 leash reads usage from real responses, in both wire formats and both shapes:
@@ -311,11 +363,18 @@ disables that boundary. Full reference: [`docs/cli-reference.md`](docs/cli-refer
 --db            ledger database path                      (default ~/.leash/leash.db)
 --run           run name; reuse it to resume that budget  (default random)
 --no-inject     do not add stream_options.include_usage   (default off)
+--log-level     debug, info, warn, error                  (default info)
+--log-format    text or json                              (default text)
 --listen        serve address (leash serve only)          (default :8088)
+--admin         admin listener: healthz, readyz, metrics  (serve only, default off)
+--require-run-id  refuse requests with no X-Loop-Id        (serve only, default off)
+--standby       wait for the lease; active/passive HA      (serve only, default off)
 ```
 
-The default cost budget is active only when a price table or compute rate makes
-a meter live; otherwise leash warns, once and loudly, that the token meter is
+Every shared flag also reads a `LEASH_`-prefixed environment variable
+(`--max-cost` reads `LEASH_MAX_COST`, and so on); an explicit flag wins. The
+default cost budget is active only when a price table or compute rate makes a
+meter live; otherwise leash warns, once and loudly, that the token meter is
 blind.
 
 ## Design
@@ -352,15 +411,19 @@ leash/
   internal/proxy/         proxy.go (enforcement), transport.go (headers, tee)
   internal/wrap/          child launch, base-url injection, signals, exit codes
   examples/fakeupstream/  a std-lib fake provider for the demo
+  tools/doccheck/         std-lib AST walker enforcing godoc on exported symbols
 ```
 
 ## Testing
 
 ```sh
 make test         # go test ./...
-go test -race ./... # the concurrent paths, race-clean
+make race         # the concurrent paths, race-clean
 make vet
 make ascii-check  # fail on any non-ASCII byte in .go or .md
+make doc-check    # fail on any undocumented exported symbol
+make fuzz         # fuzz the three parsers (short duration)
+make bench        # governed-call, fold, and stream-meter benchmarks
 make mutate       # mutation testing on the deterministic core
 ```
 
@@ -371,12 +434,14 @@ header redaction, an unclean-crash resume with no double count, a kill from a
 second process, and a wrapper run where a looping child is cut off at a boundary
 and leash exits 3.
 
-Mutation testing uses [gremlins](https://github.com/go-gremlins/gremlins). The
-last measured run on the policy core (`internal/policy`) killed 51 of 53 viable
-mutants: **96.23% test efficacy, 100% mutator coverage**. The two survivors are
-equivalent mutants (a guard at `elapsed <= 0` and a window comparison that cannot
-change behavior). This figure is measured, not claimed; rerun it with
-`make mutate`.
+The parsers, which are the attack surface, are also fuzzed with native Go
+fuzzing: the JSON and SSE meters never panic on any input, and the stream tee is
+asserted byte-identical to its source. A nightly workflow runs mutation testing.
+
+Mutation testing uses [gremlins](https://github.com/go-gremlins/gremlins) over
+`internal/policy` and `internal/meter`, gated at 90% efficacy. The last measured
+runs: **policy 96.23%**, **meter 96.00%** (Apple M4 Pro, go1.25.6). These figures
+are measured, not claimed; rerun them with `make mutate`.
 
 ## Guarantees and non-goals
 
@@ -394,8 +459,11 @@ economics of a loop; it does not judge the work.
 
 **Non-goals (deliberately not built):** no model routing, no dashboard or web UI,
 no provider SDK dependencies, no hosted anything, no request/response body
-persistence, no telemetry exporters in v1 (an observer seam is left for them),
-and no YAML - flags and environment only.
+persistence, no auth layer on the proxy (access control is the network's job),
+no TLS termination (front it with an ingress), no OpenTelemetry exporter (a
+Prometheus `/metrics` endpoint and an observer seam are there), no per-run-id
+metric labels, no journal retention yet (see docs/operations.md), and no YAML -
+flags and `LEASH_*` environment variables only.
 
 ## Documentation
 
@@ -406,7 +474,10 @@ and no YAML - flags and environment only.
 - [`docs/wrapping-agents.md`](docs/wrapping-agents.md) - Tier 1 in depth, with Python and Node examples.
 - [`docs/gateway.md`](docs/gateway.md) - Tier 2 as a sidecar or team gateway, and X-Loop-Id.
 - [`docs/metering.md`](docs/metering.md) - streaming, usage injection, and the wire formats.
-- [`docs/durability.md`](docs/durability.md) - the ledger, crash safety, ps/inspect/kill, multi-instance.
+- [`docs/durability.md`](docs/durability.md) - the ledger, crash safety, ps/inspect/kill, Postgres and standby.
+- [`docs/deployment.md`](docs/deployment.md) - systemd, Docker, Kubernetes sidecar, health checks, and metrics.
+- [`docs/security-model.md`](docs/security-model.md) - trust boundaries, what is and is not persisted, hardening.
+- [`docs/operations.md`](docs/operations.md) - backups, ledger sizing, monitoring, failover, and retention.
 - [`docs/cli-reference.md`](docs/cli-reference.md) - every command, every flag, every exit code.
 - [`docs/faq.md`](docs/faq.md) - honest answers, including what leash is not.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - how to build, test, and propose changes.
