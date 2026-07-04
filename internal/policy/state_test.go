@@ -160,3 +160,33 @@ func TestFingerprint(t *testing.T) {
 		}
 	}
 }
+
+func TestPruneSamplesBoundsAndClears(t *testing.T) {
+	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+
+	// With a rate limit, samples older than the window are dropped, but the rate
+	// baseline (the last sample at or before now-window) is retained.
+	g := NewGovernor(Limits{RateTokens: 1_000_000, RateWindow: time.Minute}, nil, 0)
+	s := &State{}
+	for i := range 10 {
+		g.Fold(s, CallRecord{Usage: Usage{Model: "m", OutputTokens: 100}, At: base.Add(time.Duration(i) * 30 * time.Second)})
+	}
+	if len(s.Samples) > 4 {
+		t.Fatalf("samples = %d after 10 folds over a 1m window; want a bounded few", len(s.Samples))
+	}
+	// The rate limiter still sees the full trailing-window delta.
+	last := base.Add(9 * 30 * time.Second)
+	if got := (RateLimit{MaxTokens: 150, Window: time.Minute}).Check(s, last); !got {
+		t.Fatalf("rate check missed the trailing delta after pruning")
+	}
+
+	// With no rate limit, samples are not retained at all.
+	g2 := NewGovernor(Limits{MaxCalls: 100}, nil, 0)
+	s2 := &State{}
+	for i := range 5 {
+		g2.Fold(s2, CallRecord{Usage: Usage{Model: "m", OutputTokens: 100}, At: base.Add(time.Duration(i) * time.Second)})
+	}
+	if len(s2.Samples) != 0 {
+		t.Fatalf("samples = %d with no rate limit; want 0", len(s2.Samples))
+	}
+}

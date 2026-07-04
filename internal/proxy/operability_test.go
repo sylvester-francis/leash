@@ -161,3 +161,36 @@ func TestEvictStoppedIdleRunColdReloadsSame429(t *testing.T) {
 		t.Fatalf("cold-reload 429 body differs from warm:\nwarm %s\ncold %s", stoppedBody, coldBody)
 	}
 }
+
+// TestEvictRunningIdleRunResumes covers the memory-bound fix: an idle run that is
+// still open (not stopped) is evicted too, and its next call cold-reloads and
+// resumes with the folded state intact.
+func TestEvictRunningIdleRunResumes(t *testing.T) {
+	front, up, p := buildProxy(t, func(c *Config) {
+		c.Governor = policy.NewGovernor(policy.Limits{MaxCalls: 100}, nil, 0)
+	})
+	const run = "idle-runner"
+	hdr := http.Header{"X-Loop-Id": {run}}
+
+	postBody(t, front, hdr, `{"model":"gpt-4o"}`)
+	postBody(t, front, hdr, `{"model":"gpt-4o"}`)
+
+	// The run is still running (well under the cap), but idle - evict it anyway.
+	if n := p.evictIdle(time.Now().Add(11 * time.Minute)); n != 1 {
+		t.Fatalf("evictIdle removed %d runs, want 1 (running-but-idle must be evicted)", n)
+	}
+	p.mu.Lock()
+	_, present := p.runs[run]
+	p.mu.Unlock()
+	if present {
+		t.Fatalf("running idle run %q still in memory after eviction", run)
+	}
+
+	// The next call cold-reloads and the run proceeds with its count preserved.
+	if code, _ := postBody(t, front, hdr, `{"model":"gpt-4o"}`); code != http.StatusOK {
+		t.Fatalf("post-eviction call status = %d, want 200 (resumed)", code)
+	}
+	if up.count() != 3 {
+		t.Fatalf("upstream saw %d calls, want 3 (run resumed after eviction)", up.count())
+	}
+}
