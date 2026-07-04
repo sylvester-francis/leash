@@ -1,0 +1,30 @@
+name: security
+
+on:
+  schedule:
+    - cron: "30 4 * * *" # nightly, after the mutation run
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/security.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          check-latest: true
+      - name: Scan for known vulnerabilities
+        # Fails on a vulnerability reachable from leash's code or its
+        # dependencies. Standard-library findings are resolved by the
+        # check-latest toolchain picking up the patched Go release.
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
