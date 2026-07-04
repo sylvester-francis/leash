@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -259,11 +260,13 @@ func buildGovernor(c *commonFlags) (*policy.Governor, policy.Limits, policy.Pric
 	return policy.NewGovernor(limits, prices, c.computeRate), limits, prices, nil
 }
 
-// warnIfBlind prints one loud warning when a cost budget is set but nothing can
-// make the token meter live: no prices and no compute rate.
-func warnIfBlind(c *commonFlags, limits policy.Limits, prices policy.PriceTable) {
+// warnIfBlind logs one loud warning when a cost budget is set but nothing can
+// make the token meter live: no prices and no compute rate. It goes through the
+// structured logger so it does not emit a stray non-JSON line under
+// --log-format json.
+func warnIfBlind(logger *slog.Logger, c *commonFlags, limits policy.Limits, prices policy.PriceTable) {
 	if limits.MaxCost > 0 && prices == nil && c.computeRate == 0 {
-		fmt.Fprintln(os.Stderr, "leash: token meter blind: supply --prices (the cost budget cannot trip without it)")
+		logger.Warn("token meter blind: supply --prices, or the cost budget cannot trip")
 	}
 }
 
