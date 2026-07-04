@@ -7,6 +7,14 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Added
+- A workflow publishing the distroless image to GHCR
+  (`ghcr.io/sylvester-francis/leash`) on each release tag.
+
+### Fixed
+- Landing page: the note arrow (`->`) no longer breaks across two lines under
+  width pressure.
+
 ## [0.1.1] - 2026-07-03
 
 Production hardening and release engineering.
