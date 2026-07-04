@@ -119,11 +119,36 @@ func (failingPinger) Ping(context.Context) error { return errors.New("no space l
 
 func TestReadyzFailsWhenLedgerUnwritable(t *testing.T) {
 	_, _, p := buildProxy(t, nil)
-	srv := NewAdminServer("", failingPinger{}, p, nil, nil)
+	srv := NewAdminServer("", failingPinger{}, p, nil, nil, nil)
 	rec := &statusRecorder{header: http.Header{}}
 	req, _ := http.NewRequest(http.MethodGet, "/readyz", nil)
 	srv.Handler.ServeHTTP(rec, req)
 	if rec.status != http.StatusServiceUnavailable {
 		t.Fatalf("/readyz status = %d, want 503 when the ledger cannot be written", rec.status)
+	}
+}
+
+// okPinger reports the ledger as writable.
+type okPinger struct{}
+
+func (okPinger) Ping(context.Context) error { return nil }
+
+func TestReadyzDrainsOnShutdown(t *testing.T) {
+	var draining atomic.Bool
+	_, _, p := buildProxy(t, nil)
+	srv := NewAdminServer("", okPinger{}, p, nil, nil, &draining)
+
+	get := func() int {
+		rec := &statusRecorder{header: http.Header{}}
+		req, _ := http.NewRequest(http.MethodGet, "/readyz", nil)
+		srv.Handler.ServeHTTP(rec, req)
+		return rec.status
+	}
+	if code := get(); code != http.StatusOK && code != 0 {
+		t.Fatalf("/readyz before draining = %d, want 200", code)
+	}
+	draining.Store(true)
+	if code := get(); code != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz while draining = %d, want 503", code)
 	}
 }

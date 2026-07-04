@@ -86,7 +86,7 @@ func TestMetricsExpositionNoRunIDLabels(t *testing.T) {
 func TestAdminEndpoints(t *testing.T) {
 	metrics := NewMetrics("v-admin", nil)
 	_, _, p := buildProxy(t, func(c *Config) { c.Observer = metrics })
-	admin := httptest.NewServer(NewAdminServer("", p.cfg.Ledger, p, metrics, nil).Handler)
+	admin := httptest.NewServer(NewAdminServer("", p.cfg.Ledger, p, metrics, nil, nil).Handler)
 	defer admin.Close()
 
 	// The ledger under test is the one the proxy governs; expose it for readyz.

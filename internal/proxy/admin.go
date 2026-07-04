@@ -20,6 +20,7 @@ import (
 	"crypto/subtle"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,7 +43,7 @@ type ActiveRunsSource interface {
 // proxied paths and can be network-segmented. metrics may be nil. When
 // authTokens is non-empty, /metrics requires a matching X-Leash-Token; health
 // and readiness stay open so orchestrator probes need no credential.
-func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, metrics *Metrics, authTokens []string) *http.Server {
+func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, metrics *Metrics, authTokens []string, draining *atomic.Bool) *http.Server {
 	var digests [][32]byte
 	for _, tok := range authTokens {
 		if tok != "" {
@@ -77,9 +78,14 @@ func NewAdminServer(addr string, pinger LedgerPinger, active ActiveRunsSource, m
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if draining != nil && draining.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "draining\n")
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
 		defer cancel()
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if err := pinger.Ping(ctx); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, "not ready\n")
