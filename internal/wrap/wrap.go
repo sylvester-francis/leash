@@ -33,6 +33,7 @@ import (
 	"github.com/sylvester-francis/leash/internal/ledger"
 	"github.com/sylvester-francis/leash/internal/policy"
 	"github.com/sylvester-francis/leash/internal/proxy"
+	"github.com/sylvester-francis/leash/internal/term"
 )
 
 // BoundaryExitCode is the exit status leash uses when a boundary stopped the
@@ -137,7 +138,8 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if state.StopReason != "" {
 		res.Stopped = true
 		res.ExitCode = BoundaryExitCode
-		fmt.Fprintln(stderr, policy.StopLine(state))
+		p := term.NewPainter(stderr)
+		fmt.Fprintln(stderr, p.StopReasonColor(policy.StopLine(state), state.StopReason))
 		return res, nil
 	}
 
