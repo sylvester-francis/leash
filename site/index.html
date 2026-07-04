@@ -250,9 +250,10 @@
   .ex pre .c { color: var(--term-dim); }
   .ex pre .ok { color: var(--term-ok); }
   .ex pre .stop { color: var(--term-stop); }
-  .ex .whats { padding: 12px 18px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); display: flex; gap: 9px; }
+  .ex .whats { padding: 12px 18px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); display: flex; gap: 9px; align-items: baseline; }
   .ex .whats b { color: var(--ink); font-weight: 600; }
-  .ex .whats .arw { color: var(--accent-ink); font-family: var(--mono); }
+  /* flex:none + nowrap keep the "->" glyph from shrinking and breaking at the hyphen. */
+  .ex .whats .arw { color: var(--accent-ink); font-family: var(--mono); flex: 0 0 auto; white-space: nowrap; }
 
   /* ---- compare ---- */
   .cmp { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
