@@ -98,3 +98,26 @@ data: [DONE]
 		t.Fatalf("Responses stream fingerprint did not match the deltas")
 	}
 }
+
+func TestParseCacheTokens(t *testing.T) {
+	// OpenAI: cached_tokens is inside prompt_tokens.
+	oa, err := ParseUsageJSON(OpenAI, []byte(`{"model":"gpt-4o","choices":[{"message":{"content":"x"}}],
+		"usage":{"prompt_tokens":1000,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":900}}}`))
+	if err != nil {
+		t.Fatalf("openai: %v", err)
+	}
+	if oa.Usage.InputTokens != 1000 || oa.Usage.CachedReadTokens != 900 {
+		t.Fatalf("openai cache: input=%d cached=%d, want 1000/900", oa.Usage.InputTokens, oa.Usage.CachedReadTokens)
+	}
+
+	// Anthropic: cache tokens are separate from input_tokens; total input sums them.
+	an, err := ParseUsageJSON(Anthropic, []byte(`{"model":"claude","content":[{"type":"text","text":"x"}],
+		"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":800,"cache_creation_input_tokens":50}}`))
+	if err != nil {
+		t.Fatalf("anthropic: %v", err)
+	}
+	if an.Usage.InputTokens != 950 || an.Usage.CachedReadTokens != 800 || an.Usage.CacheWriteTokens != 50 {
+		t.Fatalf("anthropic cache: input=%d cached=%d write=%d, want 950/800/50",
+			an.Usage.InputTokens, an.Usage.CachedReadTokens, an.Usage.CacheWriteTokens)
+	}
+}

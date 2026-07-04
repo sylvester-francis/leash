@@ -49,6 +49,11 @@ metering-integrity gaps. It is the first release to change default behavior.
   read-only/full disk reports unready. New `leash_ledger_errors_total` metric.
 
 ### Added
+- Prompt-cache pricing. Price tables accept `cached_input` and `cache_write`
+  rates, and leash reads cached-token counts from both providers (OpenAI's
+  `prompt_tokens_details.cached_tokens`; Anthropic's `cache_read_input_tokens` /
+  `cache_creation_input_tokens`), so a cache-heavy agent is metered to the
+  invoice instead of over-counted. Omitted cache rates fall back to `input`.
 - `--max-cost-per-call` (env `LEASH_MAX_COST_PER_CALL`) caps a single call's
   token cost; a call over the cap stops the run (reason `max_cost_per_call`),
   so a runaway large call cannot repeat. Bounds the one-call budget overshoot.

@@ -87,10 +87,13 @@ input, output, and reasoning tokens:
 
 ```json
 {
-  "gpt-4o": {"input": 2.5, "output": 10, "reasoning": 0},
+  "gpt-4o": {"input": 2.5, "output": 10, "reasoning": 0, "cached_input": 1.25},
   "o1": {"input": 15, "output": 60, "reasoning": 60}
 }
 ```
+
+`cached_input` and `cache_write` are optional cache rates; an omitted one falls
+back to `input`.
 
 An unknown model or an absent table means that call's token cost is zero. See
 [cost-model.md](cost-model.md).

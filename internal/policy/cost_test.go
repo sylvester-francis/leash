@@ -157,3 +157,21 @@ func TestUsageTotalTokens(t *testing.T) {
 		t.Fatalf("TotalTokens = %d, want 120 (input+output; reasoning is within output)", got)
 	}
 }
+
+func TestTokenCostCache(t *testing.T) {
+	// gpt-4o-style: input $2.50/M, cache reads at $1.25/M (half).
+	prices := PriceTable{"m": {InputPerM: 2.5, OutputPerM: 10, CachedInputPerM: 1.25, CacheWritePerM: 3.125}}
+
+	// 1M input of which 800k cache-read and 100k cache-write:
+	// full 100k @2.5 = 0.25; cached 800k @1.25 = 1.00; write 100k @3.125 = 0.3125.
+	u := Usage{Model: "m", InputTokens: 1_000_000, CachedReadTokens: 800_000, CacheWriteTokens: 100_000}
+	if got, want := TokenCost(u, prices), 0.25+1.00+0.3125; !approxEqual(got, want) {
+		t.Fatalf("cache-aware cost = %v, want %v", got, want)
+	}
+
+	// Without cache rates, cached tokens bill at the input rate (unchanged, safe).
+	plain := PriceTable{"m": {InputPerM: 2.5, OutputPerM: 10}}
+	if got, want := TokenCost(u, plain), 2.5; !approxEqual(got, want) {
+		t.Fatalf("cost without cache rates = %v, want %v (all input at input rate)", got, want)
+	}
+}
