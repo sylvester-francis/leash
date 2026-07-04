@@ -14,6 +14,7 @@ leash inspect [flags] [--json] <run>   show one run's folded journal
 leash kill [flags] <run>               durably stop a run on its next call
 leash version                          print the build version
 leash gen-token                        print a random token for --auth-token
+leash healthcheck [--url URL]          probe a health URL (for container HEALTHCHECK)
 leash help                             top-level help
 ```
 

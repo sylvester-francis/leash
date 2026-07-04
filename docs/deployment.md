@@ -93,6 +93,13 @@ kind: Pod
 metadata:
   name: agent
 spec:
+  # runAsNonRoot matches the distroless nonroot uid; fsGroup makes a mounted
+  # PersistentVolume writable by that uid (without it, a PVC-backed /data is
+  # root-owned and leash cannot open the ledger).
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
   containers:
     - name: agent
       image: your/agent:latest
@@ -109,6 +116,12 @@ spec:
         - --admin=127.0.0.1:9090
         - --db=/data/leash.db
         - --max-cost=20
+        - --drain-delay=5s
+      env:
+        # serve requires a token; supply it from a Secret.
+        - name: LEASH_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef: { name: leash-auth, key: token }
       ports:
         - containerPort: 9090
           name: admin
@@ -119,6 +132,8 @@ spec:
       volumeMounts:
         - name: ledger
           mountPath: /data
+  # Give leash time to drain in-flight streams (>= --drain-delay + longest stream).
+  terminationGracePeriodSeconds: 45
   volumes:
     # emptyDir resets on Pod restart. Use a PVC if the budget must survive one.
     - name: ledger
