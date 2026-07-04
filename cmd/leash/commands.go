@@ -231,6 +231,8 @@ func cmdServe(args []string) int {
 		"require an X-Leash-Token header matching this value; space-separate two to rotate with no downtime (prefer LEASH_AUTH_TOKEN so it stays out of the process list; empty disables)")
 	maxRuns := fs.Int("max-runs", envInt("LEASH_MAX_RUNS", 0),
 		"cap on runs tracked in memory at once; a new run beyond it is refused 503 (0 disables)")
+	insecure := fs.Bool("insecure", envBool("LEASH_INSECURE", false),
+		"allow the gateway to run with no --auth-token (forwarding live API keys unauthenticated)")
 	setUsage(fs, "leash serve - run the standalone governor gateway (Tier 2).",
 		"leash serve [flags]",
 		"leash serve --listen :8088 --max-cost 20 --prices prices.json",
@@ -240,6 +242,10 @@ func cmdServe(args []string) int {
 	}
 
 	authTokens := strings.Fields(*authToken)
+	if len(authTokens) == 0 && !*insecure {
+		fmt.Fprintln(os.Stderr, "leash: serve requires --auth-token (or LEASH_AUTH_TOKEN); pass --insecure to run open and forward API keys unauthenticated")
+		return 2
+	}
 	onBlind, err := parseBlindPolicy(c.onBlind)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)

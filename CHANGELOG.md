@@ -11,6 +11,13 @@ Following an adversarial architecture review, this release closes the
 metering-integrity gaps. It is the first release to change default behavior.
 
 ### Changed (breaking)
+- **`serve` requires authentication by default.** It refuses to start without
+  `--auth-token` / `LEASH_AUTH_TOKEN`; pass `--insecure` to keep the old
+  open-gateway behavior (which forwards live provider keys unauthenticated).
+- **Runs are tenant-scoped when auth is on.** A run id is namespaced by the
+  presenting credential, so two tenants using the same `X-Loop-Id` get separate,
+  isolated budgets and neither can burn or read the other's run. `ps`/`inspect`/
+  `kill` show the tenant-scoped ids.
 - **Fail closed on unmeterable calls.** When a cost budget is active and leash
   cannot meter a call, it now refuses by default instead of forwarding it at $0.
   An unrecognized endpoint is rejected with 402; a known-provider call that

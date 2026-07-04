@@ -96,10 +96,13 @@ For any language, CI, or a shared team gateway, run leash as a standalone proxy
 and point your agent's `base_url` at it:
 
 ```sh
-leash serve --listen :8088 --max-cost 5.00 --prices prices.json
+# serve requires a token so an open port can't forward your API keys;
+# use --insecure only for a trusted local socket.
+LEASH_AUTH_TOKEN=$(leash gen-token) leash serve --listen :8088 --max-cost 5.00 --prices prices.json
 ```
 
-The client tags each run with an `X-Loop-Id` header so each gets its own durable
+Clients then send that token in an `X-Leash-Token` header. The client tags each
+run with an `X-Loop-Id` header so each gets its own durable
 budget:
 
 ```python
