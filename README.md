@@ -485,6 +485,7 @@ flags and `LEASH_*` environment variables only. See
 - [`docs/security-model.md`](docs/security-model.md) - trust boundaries, what is and is not persisted, hardening.
 - [`docs/operations.md`](docs/operations.md) - backups, ledger sizing, monitoring, failover, and retention.
 - [`docs/cli-reference.md`](docs/cli-reference.md) - every command, every flag, every exit code.
+- [`docs/examples.md`](docs/examples.md) - copy-paste recipes by task; runnable demos in [`examples/`](examples/README.md).
 - [`docs/known-issues.md`](docs/known-issues.md) - bounded behavior and the deferred roadmap, stated plainly.
 - [`docs/faq.md`](docs/faq.md) - honest answers, including what leash is not.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - how to build, test, and propose changes.
