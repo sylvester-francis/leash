@@ -25,6 +25,8 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 ### Changed
 - CI gates on `gofmt` and `staticcheck -checks=all` via a new `make lint`; the
   tree passes both with zero findings.
+- A nightly `govulncheck` workflow scans the code and dependency closure for
+  known vulnerabilities.
 
 ### Fixed
 - Landing page: the note arrow (`->`) no longer breaks across two lines under
