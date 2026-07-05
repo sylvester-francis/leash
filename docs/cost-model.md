@@ -159,11 +159,16 @@ token meter:
 - a call whose **wire reported no usage** costs zero, because there are no counts
   to price.
 
-Zero here means "not measured," not "free." leash would rather undercount than
-invent a number, and it leans on the boundaries that do not need token counts
-(calls, deadline, stall, kill) to bound a run whose tokens it cannot see. The
-rate limit is not among them: it meters tokens per window, so a blind call is
-invisible to it too.
+Zero here means "not measured," not "free" - and unmeasured spend is exactly what
+a governor must not wave through. So under a cost budget, a blind call does not
+just cost zero and continue: by default (`--on-blind=refuse`) leash fails closed,
+delivering the already-billed call once and then stopping the run (`meter_blind`).
+The same holds for billed activity it cannot price from the table, such as an
+unpriced provider-side tool request (`server_tool_unpriced`). With
+`--on-blind=warn` or `allow`, or with no cost budget, the call costs zero and the
+run continues, leaning on the boundaries that need no token counts (calls,
+deadline, stall, kill). The rate limit is not among those: it meters tokens per
+window, so a blind call is invisible to it too.
 
 ## The compute meter
 
@@ -199,7 +204,7 @@ the budget can never trip. leash detects exactly this at startup and warns, once
 and loudly, on stderr:
 
 ```console
-leash: token meter blind: supply --prices (the cost budget cannot trip without it)
+leash: token meter blind: supply --prices, or the cost budget cannot trip
 ```
 
 The warning fires precisely when all three hold: `--max-cost` is above zero,
@@ -216,9 +221,11 @@ one of the three and the budget becomes enforceable:
 
 This startup warning is distinct from a single call going blind at runtime. Even
 with a good price table, a call whose model is unknown or whose wire carried no
-usage prices at zero; leash logs a separate per-run notice
+usage cannot be priced. Under the default `--on-blind=refuse` that call is
+delivered once and then stops the run (`meter_blind`); with `--on-blind=warn`
+leash instead logs a per-run notice
 (`token meter blind (no usage on the wire); relying on other boundaries`) the
-first time that happens and keeps going.
+first time and keeps going.
 
 ## Worked example: the 60-second demo
 
@@ -261,12 +268,13 @@ leash: stopped run demo after 4 calls, $0.10 tokens + $0.00 compute = $0.10 (cos
 Compute is $0.00 here because the demo sets no compute rate; the entire budget was
 spent on the token meter.
 
-## Out of scope for v1
+## What the meter does not model
 
-The price table has exactly three rates per model: input, output, and reasoning.
-Cache read and write pricing, batch discounts, tiered or context-length-dependent
-rates, and other per-provider billing nuances are not modeled in v1 and are not
-reflected in leash's total. Prices are entirely caller-supplied: leash ships no
-price table, applies no provider defaults, and updates no rates on your behalf.
-Keeping the table current, and choosing rates that match your contract, is your
-responsibility.
+The meter prices tokens and per-request tool charges from the rates you supply
+(input/output/reasoning, cache-read/write and its TTL split, audio, per-request
+web-search/fetch, and per-service-tier overrides; see "Refining the price"
+above). Context-length-dependent rates and batch-window discounts beyond a
+service tier are not modeled, and are not reflected in leash's total. Prices are
+entirely caller-supplied: leash ships no price table, applies no provider
+defaults, and updates no rates on your behalf. Keeping the table current, and
+choosing rates that match your contract, is your responsibility.

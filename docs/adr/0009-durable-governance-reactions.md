@@ -15,9 +15,8 @@ rerun, already the single dependency, is a durable-execution engine, and leash s
 far uses only its `Store` layer. Reactions are workflow-shaped
 (`notify` then `run a hook`, each retried), so this is the natural place to use
 rerun's execution layer and become a genuine two-layer consumer. The mechanics
-below are verified against rerun v0.2.0 source (the reactions contract, task a);
-**zero rerun changes are required**, which is itself a validation of the engine's
-API.
+below are verified against rerun v0.2.0 source; **zero rerun changes are
+required**, which is itself a validation of the engine's API.
 
 ## Decision
 
@@ -64,10 +63,11 @@ non-blocking channel send and returns, and a background worker calls `Start`.
 The honest cost, stated rather than hidden: durability begins at the worker's
 `Create`, not at the instant of the stop. A crash in the window
 `[stop -> Create commits]` drops that one reaction, and it will not re-fire,
-because `RunStopped` is a live-only transition (it fires at `proxy.go:408` and
-`:637`; a restarted stopped run cold-loads and takes the `StopReason != ""` branch
-at `proxy.go:383`, which fires `CallRefused`, never `RunStopped`). So "durable and
-crash-surviving" is true from the enqueue onward, with a bounded gap at the seam.
+because `RunStopped` is a live-only transition: it fires only on the call that
+first trips a boundary, while a restarted stopped run cold-loads and takes the
+already-stopped branch (`StopReason != ""`), which fires `CallRefused`, never
+`RunStopped`. So "durable and crash-surviving" is true from the enqueue onward,
+with a bounded gap at the seam.
 A future boot-reconciliation sweep (scan the governance ledger for `stop` / `warn`
 records with no matching reaction run and enqueue them, idempotent via the
 event-id key) closes the window; it is deferred until the window is shown to

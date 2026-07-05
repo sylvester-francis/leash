@@ -235,14 +235,16 @@ and pass it explicitly, for example
 different variable name; check the SDK's own docs for which one it honors.
 
 **The cost budget never trips.** leash meters only the token usage the provider
-reports on the wire. If a response carries no usage, that call counts zero token
-cost - the meter is blind for it - and `--max-cost` cannot trip on tokens alone.
-Common causes: no `--prices` table (or a model absent from it), which makes
-every token cost zero and prints a one-time warning; or an upstream that reports
-no usage. When the meter is blind, lean on the boundaries that need no token
-counts: `--max-calls`, `--deadline`, and `--stall` (the `--rate` limit meters
-tokens, so it is blind too). A bare `leash -- <command>` still enforces the
-default call and time limits even with no prices.
+reports on the wire, so a call with no usage cannot be priced. Under a cost budget
+with the default `--on-blind=refuse`, a blind call is delivered once and then
+stops the run (`meter_blind`) - so "never trips" usually means you set
+`--on-blind=warn`/`allow`, or have no cost budget. Common causes of a blind meter:
+no `--prices` table (or a model absent from it), which prints a one-time warning;
+or an upstream that reports no usage. If you deliberately run `warn`/`allow`, lean
+on the boundaries that need no token counts: `--max-calls`, `--deadline`, and
+`--stall` (the `--rate` limit meters tokens, so it is blind too). A bare
+`leash -- <command>` still enforces the default call and time limits even with no
+prices.
 
 **Your endpoint is not a standard chat/completions or messages path.** By
 default leash infers the upstream to forward to from the request. If your

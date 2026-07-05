@@ -60,7 +60,7 @@ sequenceDiagram
 
     C->>P: POST /v1/chat/completions (X-Loop-Id)
     P->>L: fold run journal into State (warm cache or cold reload)
-    P->>P: Evaluate boundaries (cost, calls, deadline, rate, stall, kill)
+    P->>P: Evaluate boundaries (kill, deadline, cost, calls, rate, stall)
     alt a boundary tripped
         P-->>C: 429 leash_boundary {reason, cost}  (run stays stopped)
     else may proceed

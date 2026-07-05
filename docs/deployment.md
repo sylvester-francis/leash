@@ -5,7 +5,7 @@ compose, or as a Kubernetes sidecar, with health checks and metrics wired up.
 leash is one static binary with a SQLite or Postgres ledger; there is nothing
 else to install.
 
-leash does not terminate TLS in v0.1. Front it with an ingress or load balancer
+leash does not terminate TLS. Front it with an ingress or load balancer
 that does, and let leash listen on plain HTTP behind it.
 
 ## systemd
