@@ -70,6 +70,8 @@ header gets 400.
 | `--require-run-id` | bool | `false` | refuse a request with no `X-Loop-Id` (400) instead of pooling it into `default` |
 | `--admin` | address | off | admin listener for `/healthz`, `/readyz`, `/metrics`; empty disables |
 | `--webhook` | URL | off | POST a JSON event when a run approaches a budget (`--warn-at`) or a boundary stops it; empty disables |
+| `--reactions-db` | path/DSN | off | durable reactions store (a separate SQLite path or `postgres://` DSN, distinct from `--db`); makes `--webhook` crash-surviving and enables `--on-event-exec`; empty keeps reactions best-effort |
+| `--on-event-exec` | command | off | run this command on a stop or warning, with event data in `LEASH_*` env vars; requires `--reactions-db` |
 | `--standby` | bool | `false` | wait for the governance lease instead of erroring when another instance holds it (active/passive HA) |
 | `--auth-token` | string | required | require a matching `X-Leash-Token` header; space-separate two for zero-downtime rotation; prefer `LEASH_AUTH_TOKEN` |
 | `--insecure` | bool | `false` | allow serving with no `--auth-token` (forwards live API keys unauthenticated) |
@@ -261,6 +263,21 @@ off the request path (a slow endpoint never blocks a governed call):
 
 `event` is `warning` (approaching) or `stopped` (a boundary fired); `reason` is
 the budget or boundary involved.
+
+### Durable reactions
+
+`--webhook` alone is best-effort: a crash mid-delivery or a down endpoint loses
+the event. Add `--reactions-db PATH` (a store separate from `--db`) to make
+reactions durable. A stop or warning then runs as a rerun workflow off the
+enforcement path, `notify-webhook` then `run-command-hook`, each retried and
+resumed after a restart. `--on-event-exec CMD` adds a local command hook that
+receives the event in `LEASH_EVENT`, `LEASH_RUN`, `LEASH_REASON`, `LEASH_CALLS`,
+and `LEASH_TOTAL_COST` (the command is run directly, with no shell, so put any
+arguments in a script). Delivery is at-least-once, deduplicated on the run, so a
+retry never double-sends. leash ships no built-in integrations; the command hook
+is how you reach one. See
+[docs/adr/0009-durable-governance-reactions.md](adr/0009-durable-governance-reactions.md),
+including the one bounded gap at the enqueue seam.
 
 ## Examples
 

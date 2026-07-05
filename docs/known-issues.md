@@ -18,6 +18,14 @@ docs cover the guarantees that *do* hold.
   OpenAI, or any client with a hard-coded base URL) sends traffic straight past
   leash. Those calls are simply not governed - run such agents through gateway
   mode with an explicit `--upstream`, or govern what you can reach.
+- **Durable reactions have a bounded gap at the enqueue seam.** With
+  `--reactions-db`, escalations are durable once enqueued, but the enqueue is
+  asynchronous so the enforcement path never waits on it. A crash in the small
+  window between a stop and the reaction's durable write loses that one reaction,
+  and it does not re-fire (a stop is a live-only transition). This is deliberate
+  (the meter is never blocked) and documented in
+  [ADR-0009](adr/0009-durable-governance-reactions.md); a boot-reconciliation
+  sweep can close it if the window ever matters.
 - **Stall detection is byte-exact.** The stall boundary trips on verbatim
   repeated responses. A loop that varies by a timestamp or an id each turn is
   semantically stuck but not byte-identical, and will not trip it; lean on

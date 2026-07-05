@@ -7,6 +7,17 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Added
+- Durable governance reactions (`--reactions-db`). When set, a run stopping or
+  approaching a budget triggers a crash-surviving rerun workflow off the
+  enforcement path (`notify-webhook` then `run-command-hook`, each retried),
+  instead of the best-effort webhook. The webhook is delivered durably and a
+  generic command hook (`--on-event-exec`, event data in `LEASH_*` env vars) is
+  enabled; leash ships no connectors. At-least-once, deduped on the event id.
+  Reactions use their own store, distinct from `--db`. This is leash's first use
+  of rerun's execution layer (nine symbols, no new dependency); see
+  [docs/adr/0009-durable-governance-reactions.md](docs/adr/0009-durable-governance-reactions.md).
+
 ## [0.2.4] - 2026-07-04
 
 ### Added
