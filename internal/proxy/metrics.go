@@ -110,7 +110,7 @@ func (m *Metrics) CallForwarded(p meter.Provider, u policy.Usage, blind bool) {
 	m.tokensOutput += u.OutputTokens
 	m.tokensReason += u.ReasoningTokens
 	m.tokenCostUSD += policy.TokenCost(u, m.prices)
-	m.serverToolReq += u.ServerToolRequests
+	m.serverToolReq += u.ServerToolRequests()
 	if blind {
 		m.blindCalls++
 	}

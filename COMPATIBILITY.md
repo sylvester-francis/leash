@@ -28,6 +28,11 @@ a deprecation and a documented migration:
 - **The run header** (`X-Loop-Id`) and the auth header (`X-Leash-Token`).
 - **Prometheus metric names.** Additive: new series may appear; existing names and
   label keys are kept.
+- **The `--prices` table format.** Additive: new optional per-model rate fields may
+  appear (an existing table keeps working, and an omitted rate falls back to a
+  coarser one), but unknown keys are rejected at load, so the recognized set is the
+  contract. The `reason` string `server_tool_unpriced` and the fail-closed behavior
+  on unpriceable tool spend are part of the boundary contract above.
 
 ## Durability contract
 

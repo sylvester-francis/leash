@@ -36,7 +36,7 @@ func TestParseUsageJSONAnthropicThinkingAndServerTools(t *testing.T) {
 	}
 	want := policy.Usage{
 		Model: "claude-x", InputTokens: 100, OutputTokens: 50,
-		ReasoningTokens: 20, ServerToolRequests: 3,
+		ReasoningTokens: 20, WebSearchRequests: 2, WebFetchRequests: 1,
 	}
 	if res.Usage != want {
 		t.Fatalf("Usage = %+v, want %+v", res.Usage, want)
@@ -60,7 +60,7 @@ func TestStreamMeterAnthropicThinkingAndServerTools(t *testing.T) {
 	res := m.Result()
 	want := policy.Usage{
 		Model: "claude-x", InputTokens: 100, OutputTokens: 50,
-		ReasoningTokens: 20, ServerToolRequests: 2,
+		ReasoningTokens: 20, WebSearchRequests: 2,
 	}
 	if res.Usage != want {
 		t.Fatalf("Usage = %+v, want %+v", res.Usage, want)

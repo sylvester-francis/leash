@@ -41,9 +41,9 @@ budget is one of six boundaries evaluated in a fixed order; see
 ### The price table format
 
 A price table is a JSON object mapping a model name to its price in dollars per
-million tokens. The rates are `input`, `output`, `reasoning`, and the optional
-cache rates `cached_input` (cache reads) and `cache_write` (cache creation). An
-omitted cache rate falls back to the `input` rate.
+million tokens. The core rates are `input`, `output`, `reasoning`, and the
+optional cache rates `cached_input` (cache reads) and `cache_write` (cache
+creation). An omitted cache rate falls back to the `input` rate.
 
 ```json
 {
@@ -61,11 +61,39 @@ leash --max-cost 5.00 --prices prices.json -- python my_agent.py
 
 Two loader details worth knowing:
 
-- Unknown fields inside a model's price object are rejected. A key other than
-  `input`, `output`, or `reasoning` makes the whole table fail to load, so a typo
-  or an unsupported rate is a startup error, not a silent zero.
-- A rate you omit defaults to zero. `{"m": {"input": 2.5}}` prices output and
-  reasoning at zero for model `m`.
+- Unknown fields inside a model's price object are rejected: a key leash does not
+  recognize makes the whole table fail to load, so a typo is a startup error, not
+  a silent zero.
+- A rate you omit defaults to zero, and each refinement below falls back to a
+  coarser rate, so `{"m": {"input": 2.5}}` still prices output and reasoning at
+  zero and needs no other keys.
+
+#### Refining the price (opt-in)
+
+When you need them, optional fields price finer dimensions; leave them out and
+nothing changes. All are per million tokens except the per-request tool rates:
+
+- `audio_input` / `audio_output`: audio tokens (a subset of input / output); fall
+  back to `input` / `output`.
+- `cache_write_5m` / `cache_write_1h`: the 5-minute and 1-hour TTL portions of
+  cache creation; fall back to `cache_write`.
+- `web_search_per_request` / `web_fetch_per_request`: dollars per provider-side
+  tool request (not tokens). Unset means the tool is unpriced, so a call that uses
+  it fails closed under a cost budget rather than billing at zero.
+- `tiers`: a map of service tier to a full price override. When a call reports a
+  matching `service_tier` (for example `priority` or `batch`), that tier's price
+  replaces the base for the call.
+
+```json
+{
+  "claude-sonnet": {
+    "input": 3, "output": 15, "reasoning": 15,
+    "cache_write_5m": 3.75, "cache_write_1h": 6,
+    "web_search_per_request": 0.01,
+    "tiers": {"batch": {"input": 1.5, "output": 7.5}}
+  }
+}
+```
 
 ### The cost of one call
 
