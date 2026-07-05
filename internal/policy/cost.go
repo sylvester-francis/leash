@@ -47,6 +47,12 @@ type Usage struct {
 	// ReasoningTokens is the reasoning/thinking token count when the provider
 	// reports it separately; zero otherwise.
 	ReasoningTokens int64 `json:"reasoning"`
+	// ServerToolRequests is the number of provider-side tool requests (for
+	// example Anthropic web search or web fetch) the call billed. These are
+	// per-request charges, not tokens, so leash cannot price them from the token
+	// table: they are billed activity it cannot account for. Used to fail closed,
+	// not to compute TokenCost.
+	ServerToolRequests int64 `json:"server_tool_requests,omitempty"`
 }
 
 // TotalTokens is the number of tokens the rate limiter meters. Reasoning tokens

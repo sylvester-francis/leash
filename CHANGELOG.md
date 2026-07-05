@@ -8,6 +8,16 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 ## [Unreleased]
 
 ### Added
+- Fail closed on unpriceable billed activity. A call that reports server-side tool
+  requests (Anthropic `server_tool_use` web search / web fetch) bills a per-request
+  charge leash cannot price from the token table. Under a cost budget it is now
+  treated like a blind meter: `--on-blind=refuse` (default) delivers the call then
+  stops the run with reason `server_tool_unpriced`; `warn` and `allow` behave as
+  for a blind call. The count is exported as `leash_server_tool_requests_total`.
+  This is new fail-closed behavior; set `--on-blind=warn` to keep forwarding.
+- Anthropic thinking tokens are now metered (`output_tokens_details.thinking_tokens`,
+  mapped to the reasoning rate), matching how OpenAI reasoning and Gemini thinking
+  tokens are priced.
 - Native Gemini metering. leash now reads token usage from Google's Gemini
   `generateContent` API (`usageMetadata`: prompt / candidates / thoughts / cached
   content tokens), non-streaming and SSE, mapping thinking tokens onto reasoning

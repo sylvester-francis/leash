@@ -63,6 +63,11 @@ Scrape the `--admin` `/metrics` endpoint. The series worth alerting on:
   signal: alert on it to intervene before a run hits its ceiling, rather than
   finding out from `leash_stops_total`. For push-style alerts, point
   `serve --webhook URL` at your incident tool and act on the `warning` event.
+- `rate(leash_server_tool_requests_total[5m])`. Server-side tool requests (e.g.
+  provider web search) that leash cannot price from the token table, so their
+  charge is uncounted. Under a cost budget with the default `--on-blind=refuse`,
+  such a call also stops the run (`server_tool_unpriced`); watch this to see the
+  spend you are governing by stop rather than by meter.
 - Gateway health, from the request metrics:
   - `histogram_quantile(0.99, rate(leash_request_duration_seconds_bucket[5m]))`
     for tail latency (long streamed completions live in the upper buckets).

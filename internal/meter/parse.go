@@ -77,12 +77,28 @@ type anthropicUsage struct {
 	OutputTokens             *int64 `json:"output_tokens"`
 	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+	OutputTokensDetails      struct {
+		// ThinkingTokens is a subset of OutputTokens (Anthropic's extended
+		// thinking), mapped to reasoning so it can be priced at the reasoning rate.
+		ThinkingTokens int64 `json:"thinking_tokens"`
+	} `json:"output_tokens_details"`
+	ServerToolUse struct {
+		// Per-request charges, not tokens: leash cannot price these from the token
+		// table, so their presence is what fails the run closed under a budget.
+		WebSearchRequests int64 `json:"web_search_requests"`
+		WebFetchRequests  int64 `json:"web_fetch_requests"`
+	} `json:"server_tool_use"`
 }
 
 // present reports whether the block carried any recognized token field.
 func (u *anthropicUsage) present() bool {
 	return u.InputTokens != nil || u.OutputTokens != nil ||
 		u.CacheReadInputTokens != nil || u.CacheCreationInputTokens != nil
+}
+
+// serverToolRequests is the total count of billed provider-side tool requests.
+func (u *anthropicUsage) serverToolRequests() int64 {
+	return u.ServerToolUse.WebSearchRequests + u.ServerToolUse.WebFetchRequests
 }
 
 // totalInput is the full prompt token count: Anthropic's input_tokens excludes
@@ -236,11 +252,13 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 		if r.Usage != nil && r.Usage.present() {
 			res.HasUsage = true
 			res.Usage = policy.Usage{
-				Model:            r.Model,
-				InputTokens:      r.Usage.totalInput(),
-				CachedReadTokens: deref(r.Usage.CacheReadInputTokens),
-				CacheWriteTokens: deref(r.Usage.CacheCreationInputTokens),
-				OutputTokens:     deref(r.Usage.OutputTokens),
+				Model:              r.Model,
+				InputTokens:        r.Usage.totalInput(),
+				CachedReadTokens:   deref(r.Usage.CacheReadInputTokens),
+				CacheWriteTokens:   deref(r.Usage.CacheCreationInputTokens),
+				OutputTokens:       deref(r.Usage.OutputTokens),
+				ReasoningTokens:    r.Usage.OutputTokensDetails.ThinkingTokens,
+				ServerToolRequests: r.Usage.serverToolRequests(),
 			}
 		}
 		return res, nil
