@@ -302,14 +302,14 @@ sequenceDiagram
     autonumber
     participant A as Agent
     participant L as leash
-    participant J as Journal (durable)
+    participant J as Durable journal
     A->>L: call 1..N
-    L->>J: append call-0 .. call-(N-1)
-    Note over L: CRASH - process dies uncleanly
+    L->>J: append call-0 to call-N
+    Note over L: CRASH, process dies uncleanly
     Note over L,J: new process opens the same --db
     A->>L: next call
-    L->>J: LoadLogs, fold -> totals rebuilt (N calls)
-    L-->>A: over budget -> 429, stays stopped
+    L->>J: LoadLogs, fold, totals rebuilt
+    L-->>A: over budget, 429, stays stopped
 ```
 
 Inspect the ledger from any process while a run is live:
