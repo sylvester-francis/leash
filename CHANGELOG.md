@@ -7,6 +7,13 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Added
+- The SQLite single-governor lock is now enforced on Windows via `LockFileEx`,
+  matching the Unix `flock` guard, so a second `leash serve` on the same SQLite
+  ledger is refused rather than silently double-governing. The Windows lock is
+  exercised in CI, not just built. Implemented through the standard-library
+  `syscall` package, so no dependency is added.
+
 ### Fixed
 - Ledger appends are now idempotent by tag. A durable write that commits but
   returns an error to its caller is no longer re-recorded on retry: the append

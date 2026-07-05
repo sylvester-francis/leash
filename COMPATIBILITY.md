@@ -49,8 +49,9 @@ a deprecation and a documented migration:
 
 ## Platforms
 
-- Built and tested on Linux and macOS (amd64 and arm64). Windows is build-only:
-  child-signal forwarding is unsupported there, and the SQLite single-governor OS
-  lock is not enforced (use one governor per ledger, or Postgres).
+- Built and tested on Linux and macOS (amd64 and arm64). On Windows the ledger,
+  including the SQLite single-governor lock (`LockFileEx`), is built and tested in
+  CI, but child-signal forwarding is unsupported, so wrapper mode (`leash -- ...`)
+  cannot stop a child by signal there; run the gateway (`leash serve`) instead.
 - Built with the current Go minor release; CI uses `check-latest` so a patched
   toolchain is picked up automatically.
