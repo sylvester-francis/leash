@@ -252,10 +252,21 @@ model to dollars per million input, output, and reasoning tokens:
 {"gpt-4o": {"input": 2.5, "output": 10, "reasoning": 0}}
 ```
 
+Optional per-model rates refine that when you need them, each falling back to a
+coarser rate so a plain input/output table is unchanged: cache-read/write and
+per-TTL cache rates, audio rates, per-request charges for provider-side tools
+(`web_search_per_request` / `web_fetch_per_request`), and per-service-tier
+overrides under `tiers`. leash reads the matching wire fields (reasoning/thinking
+and audio tokens, the Anthropic cache-TTL split, the service tier, and server-tool
+counts) and prices each subset exactly once. See
+[`docs/cost-model.md`](docs/cost-model.md).
+
 An unknown model or an absent table makes that call's token cost blind. leash
 never hardcodes a price and never estimates tokens, so under a cost budget it
 refuses an unpriceable call by default (fail closed); `--on-blind=warn` keeps the
-old count-zero-and-continue behavior.
+old count-zero-and-continue behavior. The same holds for billed activity it cannot
+price, such as a provider-side web search with no per-request rate: it fails closed
+(`server_tool_unpriced`) until you price it.
 
 The **compute meter** is elapsed wall-clock time times `--compute-rate` (dollars
 per hour, default zero) - the meter for a self-hosted agent whose real cost is
