@@ -2,10 +2,18 @@
 
 leash never estimates tokens. It counts only what the provider puts on the
 wire, and when the wire is silent it marks the call blind rather than guess.
-This guide is how that reading works: the two wire formats leash understands
-(OpenAI-compatible and Anthropic), the two shapes each can take (one JSON body,
-or a server-sent-event stream), and the one request rewrite that makes an
-OpenAI stream report its usage at all.
+This guide is how that reading works: the three wire formats leash understands
+(OpenAI-compatible, Anthropic, and Gemini), the two shapes each can take (one
+JSON body, or a server-sent-event stream), and the one request rewrite that makes
+an OpenAI stream report its usage at all.
+
+leash keys on the wire *format*, not the model name, so it does not go stale when
+a provider ships a new model: add a row to your price table and it works. And
+because the OpenAI format is the ecosystem's lingua franca, "OpenAI-compatible"
+covers far more than OpenAI itself, including Gemini and Ollama through their
+OpenAI-compatible endpoints, plus OpenRouter, Groq, Together, vLLM, and the rest.
+The Gemini format below is for Gemini's *native* `generateContent` API; its
+OpenAI-compatible endpoint is metered as OpenAI.
 
 The code lives in `internal/meter`: `provider.go` (detection and the `Result`
 type), `parse.go` (non-streaming JSON), `stream.go` (the SSE tee-and-meter), and
@@ -33,8 +41,10 @@ and the usage block arrive in different places on the wire.
 
 - An `Anthropic-Version` header wins outright -> Anthropic.
 - Otherwise the path decides: a path containing `/messages` -> Anthropic; a path
-  containing `/completions` or `/responses` -> OpenAI. (Both `/chat/completions`
-  and `/completions` contain `/completions`.)
+  containing `/completions` or `/responses` -> OpenAI (both `/chat/completions`
+  and `/completions` contain `/completions`); a path containing `generateContent`
+  (case-insensitive, covering `:generateContent` and `:streamGenerateContent`) ->
+  Gemini.
 - Anything else -> Unknown. leash forwards Unknown requests but does not meter
   them.
 
@@ -146,6 +156,35 @@ data: {"type":"message_stop"}
 
 leash reads only `data:` lines; the `event:` lines are informational and
 ignored.
+
+## Gemini wire format
+
+This is Gemini's native `generateContent` API. (Gemini's OpenAI-compatible
+endpoint is a `/chat/completions` path and is metered as OpenAI.) Usage lives in
+`usageMetadata`, and the billed model name is `modelVersion`.
+
+### Non-streaming JSON
+
+leash maps `usageMetadata.promptTokenCount` to input, `candidatesTokenCount` to
+output, `thoughtsTokenCount` to reasoning, and `cachedContentTokenCount` to
+cache-read input. On the Gemini API, `candidatesTokenCount` already includes any
+thinking tokens (also reported in `thoughtsTokenCount`), which is exactly leash's
+reasoning-is-a-subset-of-output model, so a thinking model is priced once:
+non-reasoning output at the output rate, reasoning at the reasoning rate.
+Assistant text is the candidates' `content.parts[].text`.
+
+Note: Vertex AI reports `candidatesTokenCount` *excluding* thinking, the opposite
+of the Gemini API. leash targets the Gemini API
+(`generativelanguage.googleapis.com`); route Vertex through an OpenAI-compatible
+endpoint or price with that difference in mind.
+
+### Streaming SSE
+
+`:streamGenerateContent?alt=sse` emits `data:` chunks, each a
+`GenerateContentResponse` with partial `parts` text and a cumulative
+`usageMetadata`. leash concatenates the text and takes the last `usageMetadata`
+as authoritative, the same last-wins rule as Anthropic's `message_delta`. Gemini
+needs no usage injection: `usageMetadata` is always present.
 
 ## The tee: byte for byte, never buffered
 
