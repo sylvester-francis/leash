@@ -62,15 +62,20 @@ current releases, not overlooked. Each is tracked as a GitHub issue under the
   candidates-includes-thoughts semantics, which Google may change without notice;
   tracked so a silent metering regression is caught, not shipped.
 
-Durable governance reactions, native Gemini metering, Anthropic thinking tokens,
-fail-closed pricing of server-side tools, and opt-in priced dimensions (audio,
-cache-TTL, per-request tools, service tiers) have since shipped, alongside soft
-limits and backpressure ([#22](https://github.com/sylvester-francis/leash/issues/22)),
-richer observability ([#23](https://github.com/sylvester-francis/leash/issues/23)),
-a signed release supply chain ([#24](https://github.com/sylvester-francis/leash/issues/24)),
-the Windows SQLite governor lock ([#25](https://github.com/sylvester-francis/leash/issues/25)),
-and idempotent ledger appends ([#26](https://github.com/sylvester-francis/leash/issues/26));
-see [security-model.md](security-model.md) for verifying a release.
+## Shipped
+
+Closed and released. See the [CHANGELOG](../CHANGELOG.md) for the version each
+landed in, and [security-model.md](security-model.md) for verifying a release.
+
+- **Durable governance reactions** ([#54](https://github.com/sylvester-francis/leash/issues/54), closed).
+- **Native Gemini metering** ([#55](https://github.com/sylvester-francis/leash/issues/55), closed).
+- **Anthropic thinking tokens; fail closed on unpriceable tool spend** ([#56](https://github.com/sylvester-francis/leash/issues/56), closed).
+- **Opt-in priced dimensions** (audio, cache-TTL, per-request tools, service tiers) ([#57](https://github.com/sylvester-francis/leash/issues/57), closed).
+- **Soft limits and backpressure** ([#22](https://github.com/sylvester-francis/leash/issues/22), closed).
+- **Richer observability** ([#23](https://github.com/sylvester-francis/leash/issues/23), closed).
+- **Signed release supply chain** ([#24](https://github.com/sylvester-francis/leash/issues/24), closed).
+- **Windows SQLite governor lock** ([#25](https://github.com/sylvester-francis/leash/issues/25), closed).
+- **Idempotent ledger appends** ([#26](https://github.com/sylvester-francis/leash/issues/26), closed).
 
 Have a use case that one of these blocks? Comment on the issue - it helps
 prioritize.
