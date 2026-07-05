@@ -107,6 +107,26 @@ a detached context so a client that disconnects mid-stream cannot drop it.
 | change durable storage | `internal/ledger/` (behind the `rerun.Store` seam) |
 | add a flag or subcommand | `cmd/leash/` |
 
+## Performance envelope
+
+leash adds one proxy hop and a small, bounded amount of work per call. The shape
+matters more than any single number, so it is stated as complexity, with
+benchmarks (`make bench`) to catch regressions:
+
+- **Warm-path append: O(1).** An ongoing run keeps its folded `State` and last
+  journal sequence in memory, so a call folds incrementally and appends at a
+  hinted position without re-reading the journal (`BenchmarkFold`,
+  `BenchmarkGovernedCall`).
+- **Cold load: O(journal).** The first touch of a run, or one after eviction,
+  folds the whole journal once. This is the throughput ceiling per governor and is
+  why a single governor owns a ledger ([ADR-0001], [ADR-0004]).
+- **Streaming: constant overhead, zero buffering.** The response is teed through
+  to the client as it arrives while usage is metered on the side; leash never
+  buffers a whole stream (`BenchmarkStreamMeter`).
+- **Memory: bounded by recently active runs.** Idle runs are evicted and rebuild
+  on demand ([ADR-0008]); per-run rate samples are pruned to the rate window, so
+  a long run does not accumulate state without limit.
+
 ## Testing shape
 
 Unit tests per package; `-race` on everything; mutation testing on the core
