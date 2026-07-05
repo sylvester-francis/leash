@@ -1,0 +1,38 @@
+name: pr-size
+
+# Block oversized pull requests: a PR changing more than 20 files is failed here,
+# so it cannot merge (repo owners can still override via admin). Split large work
+# into smaller PRs; an approved ADR can carry the plan across them.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  size-guard:
+    name: size-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce a 20-file limit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const MAX = 20;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+            const count = files.length;
+            core.info(`This PR changes ${count} file(s); limit is ${MAX}.`);
+            if (count > MAX) {
+              core.setFailed(
+                `This PR changes ${count} files, over the ${MAX}-file limit. ` +
+                `Split it into smaller PRs; an approved ADR can carry the plan across them.`
+              );
+            }

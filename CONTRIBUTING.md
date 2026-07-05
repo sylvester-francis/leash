@@ -67,6 +67,27 @@ run.
 
 ## Proposing a change
 
-Open an issue describing the failure mode a change addresses - leash's controls
-are each motivated by a way an agent loop goes wrong, and a new one should name
-the way it goes wrong too. Keep pull requests focused, tested, and green.
+Substantial changes (a new feature, a new flag, a change to behavior,
+architecture, or a public contract) start with an **Architecture Decision Record**,
+not a pull request:
+
+1. Copy an existing record in [`docs/adr/`](docs/adr/) to a new numbered file with
+   status *Proposed*. Describe the failure mode the change addresses (leash's
+   controls are each motivated by a way an agent loop goes wrong, so name the way
+   it goes wrong), the options, and the decision.
+2. Open the ADR as a pull request for discussion. Once it is approved, implement it
+   and open the implementation pull request referencing the ADR.
+
+Obvious small fixes (typos, docs, a clear bug with an obvious fix) can skip the ADR
+and go straight to a focused pull request.
+
+Keep pull requests focused, tested, and green. A PR that changes more than **20
+files** is automatically blocked; split it into smaller PRs (an approved ADR can
+carry the plan across them).
+
+## Forks
+
+leash is Apache 2.0, so you are free to fork and modify it. If your fork improves
+leash, please send the improvement back as a pull request instead of letting it
+diverge. Upstreaming keeps everyone on one maintained line and gets your change
+reviewed and released. This is a request, not a license term.
