@@ -42,17 +42,36 @@ type Usage struct {
 	// CacheWriteTokens is the portion of InputTokens written to the prompt cache,
 	// billed at the cache-write rate. A subset of InputTokens.
 	CacheWriteTokens int64 `json:"cache_write,omitempty"`
+	// CacheWrite5mTokens and CacheWrite1hTokens are the 5-minute and 1-hour TTL
+	// portions of CacheWriteTokens, priced at their own rates when set. Subsets of
+	// CacheWriteTokens.
+	CacheWrite5mTokens int64 `json:"cache_write_5m,omitempty"`
+	CacheWrite1hTokens int64 `json:"cache_write_1h,omitempty"`
+	// AudioInputTokens is the audio portion of InputTokens, priced at the audio
+	// input rate when set. A subset of InputTokens.
+	AudioInputTokens int64 `json:"audio_input,omitempty"`
 	// OutputTokens is the completion token count.
 	OutputTokens int64 `json:"output"`
 	// ReasoningTokens is the reasoning/thinking token count when the provider
-	// reports it separately; zero otherwise.
+	// reports it separately; zero otherwise. A subset of OutputTokens.
 	ReasoningTokens int64 `json:"reasoning"`
-	// ServerToolRequests is the number of provider-side tool requests (for
-	// example Anthropic web search or web fetch) the call billed. These are
-	// per-request charges, not tokens, so leash cannot price them from the token
-	// table: they are billed activity it cannot account for. Used to fail closed,
-	// not to compute TokenCost.
-	ServerToolRequests int64 `json:"server_tool_requests,omitempty"`
+	// AudioOutputTokens is the audio portion of OutputTokens, priced at the audio
+	// output rate when set. A subset of OutputTokens.
+	AudioOutputTokens int64 `json:"audio_output,omitempty"`
+	// WebSearchRequests and WebFetchRequests are provider-side tool requests the
+	// call billed. These are per-request charges, not tokens. Priced from the
+	// table's per-request rates when set; when a request has no rate, it is billed
+	// activity leash cannot account for and the call is failed closed.
+	WebSearchRequests int64 `json:"web_search,omitempty"`
+	WebFetchRequests  int64 `json:"web_fetch,omitempty"`
+	// ServiceTier names the provider service tier (for example "priority" or
+	// "batch"); when set and present in a Price's Tiers, that tier's rates apply.
+	ServiceTier string `json:"service_tier,omitempty"`
+}
+
+// ServerToolRequests is the total count of billed provider-side tool requests.
+func (u Usage) ServerToolRequests() int64 {
+	return u.WebSearchRequests + u.WebFetchRequests
 }
 
 // TotalTokens is the number of tokens the rate limiter meters. Reasoning tokens
@@ -76,6 +95,28 @@ type Price struct {
 	// CacheWritePerM is dollars per million cache-write input tokens; when zero,
 	// cache writes are billed at the input rate.
 	CacheWritePerM float64 `json:"cache_write"`
+
+	// The fields below are opt-in refinements. Each unset (zero) field falls back
+	// to a coarser rate, so a table that sets only input/output/reasoning behaves
+	// exactly as before.
+
+	// CacheWrite5mPerM and CacheWrite1hPerM price the 5-minute and 1-hour TTL
+	// portions of cache-write tokens; each falls back to CacheWritePerM.
+	CacheWrite5mPerM float64 `json:"cache_write_5m"`
+	CacheWrite1hPerM float64 `json:"cache_write_1h"`
+	// AudioInputPerM and AudioOutputPerM price audio tokens; they fall back to the
+	// input and output rates.
+	AudioInputPerM  float64 `json:"audio_input"`
+	AudioOutputPerM float64 `json:"audio_output"`
+	// WebSearchPerRequest and WebFetchPerRequest are dollars per provider-side
+	// tool request. Unset (zero) means the tool is unpriced, so a call that uses it
+	// fails closed under a cost budget rather than billing at zero.
+	WebSearchPerRequest float64 `json:"web_search_per_request"`
+	WebFetchPerRequest  float64 `json:"web_fetch_per_request"`
+	// Tiers holds per-service-tier price overrides. When a call's ServiceTier
+	// matches a key, that tier's Price replaces this one for the call (a tier's own
+	// Tiers is ignored).
+	Tiers map[string]Price `json:"tiers,omitempty"`
 }
 
 // PriceTable maps a model name to its Price. A nil or missing entry means the
@@ -93,39 +134,82 @@ func TokenCost(u Usage, table PriceTable) float64 {
 	if !ok {
 		return 0
 	}
-	// Reasoning tokens are a subset of the reported output tokens (OpenAI's
-	// completion_tokens includes them), so charge the non-reasoning output at the
-	// output rate and reasoning at the reasoning rate. When no reasoning rate is
-	// set, reasoning falls under the output rate - so it is priced once, never
-	// twice, and never for free.
-	reasoning := u.ReasoningTokens
-	billableOutput := u.OutputTokens - reasoning
-	if billableOutput < 0 {
-		billableOutput = 0
-		reasoning = u.OutputTokens
+	e := effectivePrice(p, u.ServiceTier)
+	return tokenSpend(u, e) + toolSpend(u, e)
+}
+
+// effectivePrice returns the tier override when the call names a tier that the
+// price defines, otherwise the base price.
+func effectivePrice(base Price, tier string) Price {
+	if tier != "" {
+		if tp, ok := base.Tiers[tier]; ok {
+			return tp
+		}
 	}
-	reasoningRate := p.ReasoningPerM
-	if reasoningRate == 0 {
-		reasoningRate = p.OutputPerM
+	return base
+}
+
+// rate returns v, or fallback when v is zero, so an unset refinement never prices
+// at zero (never accidentally free) and never double counts.
+func rate(v, fallback float64) float64 {
+	if v == 0 {
+		return fallback
 	}
-	// Cached and cache-written tokens are a subset of the input, priced at their
-	// own rates; the rest of the input pays the full input rate. When a cache
-	// rate is unset it falls back to the input rate, so pricing without cache
-	// rates is unchanged (and never accidentally free).
-	cachedRate := p.CachedInputPerM
-	if cachedRate == 0 {
-		cachedRate = p.InputPerM
+	return v
+}
+
+// perM is tokens priced at ratePerM dollars per million.
+func perM(tokens int64, ratePerM float64) float64 {
+	return float64(tokens) / tokensPerMillion * ratePerM
+}
+
+// tokenSpend prices a call's tokens under p. Reasoning and audio are subsets of
+// output; cache-read, cache-write, and audio are subsets of input; each is priced
+// at its own rate (falling back to a coarser one) and the remainder at the base
+// rate, so every token is counted exactly once.
+func tokenSpend(u Usage, p Price) float64 {
+	// Output side.
+	reasoning := min(u.ReasoningTokens, u.OutputTokens)
+	audioOut := max(0, min(u.AudioOutputTokens, u.OutputTokens-reasoning))
+	billableOutput := max(0, u.OutputTokens-reasoning-audioOut)
+	out := perM(billableOutput, p.OutputPerM) +
+		perM(reasoning, rate(p.ReasoningPerM, p.OutputPerM)) +
+		perM(audioOut, rate(p.AudioOutputPerM, p.OutputPerM))
+
+	// Input side. Cache-write splits into TTL tiers; the untiered remainder pays
+	// the base cache-write rate.
+	cw5m := min(u.CacheWrite5mTokens, u.CacheWriteTokens)
+	cw1h := max(0, min(u.CacheWrite1hTokens, u.CacheWriteTokens-cw5m))
+	cwBase := max(0, u.CacheWriteTokens-cw5m-cw1h)
+	writeRate := rate(p.CacheWritePerM, p.InputPerM)
+	fullInput := max(0, u.InputTokens-u.CachedReadTokens-u.CacheWriteTokens-u.AudioInputTokens)
+	in := perM(fullInput, p.InputPerM) +
+		perM(u.CachedReadTokens, rate(p.CachedInputPerM, p.InputPerM)) +
+		perM(u.AudioInputTokens, rate(p.AudioInputPerM, p.InputPerM)) +
+		perM(cwBase, writeRate) +
+		perM(cw5m, rate(p.CacheWrite5mPerM, writeRate)) +
+		perM(cw1h, rate(p.CacheWrite1hPerM, writeRate))
+	return in + out
+}
+
+// toolSpend prices per-request provider-side tool charges. An unpriced tool
+// (rate zero) contributes nothing here; UnpricedToolActivity flags it so the
+// caller fails closed instead of billing it at zero.
+func toolSpend(u Usage, p Price) float64 {
+	return float64(u.WebSearchRequests)*p.WebSearchPerRequest +
+		float64(u.WebFetchRequests)*p.WebFetchPerRequest
+}
+
+// UnpricedToolActivity reports whether a call billed provider-side tool requests
+// the model's effective price does not cover. That spend cannot be metered from
+// the table, so the caller fails closed on it (see the proxy's --on-blind path).
+func UnpricedToolActivity(u Usage, table PriceTable) bool {
+	var p Price
+	if table != nil {
+		p = effectivePrice(table[u.Model], u.ServiceTier)
 	}
-	writeRate := p.CacheWritePerM
-	if writeRate == 0 {
-		writeRate = p.InputPerM
-	}
-	fullInput := max(0, u.InputTokens-u.CachedReadTokens-u.CacheWriteTokens)
-	return float64(fullInput)/tokensPerMillion*p.InputPerM +
-		float64(u.CachedReadTokens)/tokensPerMillion*cachedRate +
-		float64(u.CacheWriteTokens)/tokensPerMillion*writeRate +
-		float64(billableOutput)/tokensPerMillion*p.OutputPerM +
-		float64(reasoning)/tokensPerMillion*reasoningRate
+	return (u.WebSearchRequests > 0 && p.WebSearchPerRequest == 0) ||
+		(u.WebFetchRequests > 0 && p.WebFetchPerRequest == 0)
 }
 
 // ComputeCost returns the dollar cost of elapsed wall-clock time at ratePerHour
@@ -139,12 +223,17 @@ func ComputeCost(elapsed time.Duration, ratePerHour float64) float64 {
 }
 
 // LoadPriceTable decodes a JSON price table from r. The document is an object
-// mapping model name to an object with input, output, and reasoning dollars per
-// million tokens, for example:
+// mapping model name to a price. The common case is input, output, and reasoning
+// dollars per million tokens:
 //
 //	{"gpt-4o": {"input": 2.5, "output": 10, "reasoning": 0}}
 //
-// It returns an error wrapping any decode failure.
+// Optional fields refine that when you need them, and unset ones fall back to a
+// coarser rate, so the simple case above is unchanged: cache-read/write rates,
+// per-TTL cache-write rates (cache_write_5m / cache_write_1h), audio rates
+// (audio_input / audio_output), per-request tool rates
+// (web_search_per_request / web_fetch_per_request), and per-service-tier
+// overrides under "tiers". It returns an error wrapping any decode failure.
 func LoadPriceTable(r io.Reader) (PriceTable, error) {
 	var table PriceTable
 	dec := json.NewDecoder(r)

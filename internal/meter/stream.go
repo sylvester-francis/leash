@@ -30,16 +30,10 @@ import (
 // the bytes flow through to the client untouched. Construct one per streaming
 // call, run Tee, then read Result.
 type StreamMeter struct {
-	provider   Provider
-	model      string
-	input      int64
-	output     int64
-	reasoning  int64
-	cachedRead int64
-	cacheWrite int64
-	serverTool int64
-	text       strings.Builder
-	hasUsage   bool
+	provider Provider
+	usage    policy.Usage
+	text     strings.Builder
+	hasUsage bool
 }
 
 // NewStreamMeter returns a StreamMeter for the given provider.
@@ -71,15 +65,7 @@ func (m *StreamMeter) Tee(dst io.Writer, src io.Reader) error {
 // Result returns the accumulated usage, content fingerprint, and blindness.
 func (m *StreamMeter) Result() Result {
 	return Result{
-		Usage: policy.Usage{
-			Model:              m.model,
-			InputTokens:        m.input,
-			CachedReadTokens:   m.cachedRead,
-			CacheWriteTokens:   m.cacheWrite,
-			OutputTokens:       m.output,
-			ReasoningTokens:    m.reasoning,
-			ServerToolRequests: m.serverTool,
-		},
+		Usage:       m.usage,
 		Fingerprint: policy.Fingerprint(m.text.String()),
 		HasUsage:    m.hasUsage,
 	}
@@ -112,17 +98,19 @@ func (m *StreamMeter) parseLine(line []byte) {
 // Responses API, Type names a typed event: response.output_text.delta carries a
 // text delta and response.completed carries the final usage.
 type openAIChunk struct {
-	Type    string `json:"type"`
-	Model   string `json:"model"`
-	Choices []struct {
+	Type        string `json:"type"`
+	Model       string `json:"model"`
+	ServiceTier string `json:"service_tier"`
+	Choices     []struct {
 		Delta struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Usage    *openAIUsage `json:"usage"`
 	Response struct {
-		Model string       `json:"model"`
-		Usage *openAIUsage `json:"usage"`
+		Model       string       `json:"model"`
+		ServiceTier string       `json:"service_tier"`
+		Usage       *openAIUsage `json:"usage"`
 	} `json:"response"`
 }
 
@@ -132,10 +120,16 @@ func (m *StreamMeter) parseOpenAIData(data []byte) {
 		return
 	}
 	if c.Model != "" {
-		m.model = c.Model
+		m.usage.Model = c.Model
 	}
 	if c.Response.Model != "" {
-		m.model = c.Response.Model
+		m.usage.Model = c.Response.Model
+	}
+	if c.ServiceTier != "" {
+		m.usage.ServiceTier = c.ServiceTier
+	}
+	if c.Response.ServiceTier != "" {
+		m.usage.ServiceTier = c.Response.ServiceTier
 	}
 	for _, ch := range c.Choices {
 		m.text.WriteString(ch.Delta.Content)
@@ -154,20 +148,41 @@ func (m *StreamMeter) parseOpenAIData(data []byte) {
 	m.applyOpenAIUsage(c.Response.Usage)
 }
 
-// applyOpenAIUsage records a usage block when it carries recognized fields.
+// applyOpenAIUsage records the token counts from a usage block (the final chunk
+// carries the full totals), preserving the model and service tier read from the
+// chunk envelope.
 func (m *StreamMeter) applyOpenAIUsage(u *openAIUsage) {
 	if u == nil {
 		return
 	}
-	if in, out, reasoning, cachedRead, present := u.normalize(); present {
+	if got, present := u.toUsage(); present {
 		m.hasUsage = true
-		m.input, m.output, m.reasoning, m.cachedRead = in, out, reasoning, cachedRead
+		got.Model, got.ServiceTier = m.usage.Model, m.usage.ServiceTier
+		m.usage = got
+	}
+}
+
+// parseGeminiData handles one Gemini SSE chunk (a GenerateContentResponse).
+// usageMetadata is cumulative across chunks, so the last one seen wins, matching
+// how the final chunk carries the authoritative totals.
+func (m *StreamMeter) parseGeminiData(data []byte) {
+	var c geminiResponse
+	if err := json.Unmarshal(data, &c); err != nil {
+		return
+	}
+	if c.ModelVersion != "" {
+		m.usage.Model = c.ModelVersion
+	}
+	m.text.WriteString(c.text())
+	if c.UsageMetadata != nil && c.UsageMetadata.present() {
+		m.hasUsage = true
+		m.usage = c.UsageMetadata.toUsage(m.usage.Model)
 	}
 }
 
 // anthropicEvent covers the fields leash reads across Anthropic stream events.
 // message_start carries input tokens; content_block_delta carries text;
-// message_delta carries cumulative output tokens.
+// message_delta carries cumulative output tokens plus thinking and tool usage.
 type anthropicEvent struct {
 	Type    string `json:"type"`
 	Message struct {
@@ -181,25 +196,6 @@ type anthropicEvent struct {
 	Usage *anthropicUsage `json:"usage"`
 }
 
-// parseGeminiData handles one Gemini SSE chunk (a GenerateContentResponse).
-// usageMetadata is cumulative across chunks, so the last one seen wins, matching
-// how the final chunk carries the authoritative totals.
-func (m *StreamMeter) parseGeminiData(data []byte) {
-	var c geminiResponse
-	if err := json.Unmarshal(data, &c); err != nil {
-		return
-	}
-	if c.ModelVersion != "" {
-		m.model = c.ModelVersion
-	}
-	m.text.WriteString(c.text())
-	if c.UsageMetadata != nil && c.UsageMetadata.present() {
-		m.hasUsage = true
-		u := c.UsageMetadata.toUsage(m.model)
-		m.input, m.cachedRead, m.output, m.reasoning = u.InputTokens, u.CachedReadTokens, u.OutputTokens, u.ReasoningTokens
-	}
-}
-
 func (m *StreamMeter) parseAnthropicData(data []byte) {
 	var e anthropicEvent
 	if err := json.Unmarshal(data, &e); err != nil {
@@ -208,14 +204,21 @@ func (m *StreamMeter) parseAnthropicData(data []byte) {
 	switch e.Type {
 	case "message_start":
 		if e.Message.Model != "" {
-			m.model = e.Message.Model
+			m.usage.Model = e.Message.Model
 		}
 		if e.Message.Usage != nil && e.Message.Usage.present() {
 			m.hasUsage = true
-			m.input = e.Message.Usage.totalInput()
-			m.cachedRead = deref(e.Message.Usage.CacheReadInputTokens)
-			m.cacheWrite = deref(e.Message.Usage.CacheCreationInputTokens)
-			m.output = deref(e.Message.Usage.OutputTokens)
+			// Input-side fields arrive with message_start.
+			iu := e.Message.Usage.toUsage()
+			m.usage.InputTokens = iu.InputTokens
+			m.usage.CachedReadTokens = iu.CachedReadTokens
+			m.usage.CacheWriteTokens = iu.CacheWriteTokens
+			m.usage.CacheWrite5mTokens = iu.CacheWrite5mTokens
+			m.usage.CacheWrite1hTokens = iu.CacheWrite1hTokens
+			m.usage.OutputTokens = iu.OutputTokens
+			if iu.ServiceTier != "" {
+				m.usage.ServiceTier = iu.ServiceTier
+			}
 		}
 	case "content_block_delta":
 		if e.Delta.Type == "text_delta" {
@@ -224,9 +227,15 @@ func (m *StreamMeter) parseAnthropicData(data []byte) {
 	case "message_delta":
 		if e.Usage != nil && e.Usage.present() {
 			m.hasUsage = true
-			m.output = deref(e.Usage.OutputTokens) // Anthropic reports cumulative output.
-			m.reasoning = e.Usage.OutputTokensDetails.ThinkingTokens
-			m.serverTool = e.Usage.serverToolRequests()
+			// Output-side fields (cumulative) arrive with message_delta.
+			ou := e.Usage.toUsage()
+			m.usage.OutputTokens = ou.OutputTokens
+			m.usage.ReasoningTokens = ou.ReasoningTokens
+			m.usage.WebSearchRequests = ou.WebSearchRequests
+			m.usage.WebFetchRequests = ou.WebFetchRequests
+			if ou.ServiceTier != "" {
+				m.usage.ServiceTier = ou.ServiceTier
+			}
 		}
 	}
 }

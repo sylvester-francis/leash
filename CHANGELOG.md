@@ -8,6 +8,16 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 ## [Unreleased]
 
 ### Added
+- Opt-in priced dimensions in the price table. Beyond input/output/reasoning and
+  the cache rates, a model's price may now set per-request tool rates
+  (`web_search_per_request`, `web_fetch_per_request`), audio rates
+  (`audio_input`, `audio_output`), per-TTL cache-write rates (`cache_write_5m`,
+  `cache_write_1h`), and per-service-tier overrides under `tiers`. leash reads the
+  matching wire fields (OpenAI/Anthropic audio tokens, Anthropic cache-TTL split,
+  the `service_tier`, and the server-tool counts) and prices each subset exactly
+  once. Every field is optional and falls back to a coarser rate, so existing
+  tables are unchanged. Pricing a tool turns the fail-closed case into a metered,
+  counted charge. See [docs/cost-model.md](docs/cost-model.md).
 - Fail closed on unpriceable billed activity. A call that reports server-side tool
   requests (Anthropic `server_tool_use` web search / web fetch) bills a per-request
   charge leash cannot price from the token table. Under a cost budget it is now

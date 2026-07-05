@@ -35,37 +35,46 @@ type openAIUsage struct {
 	OutputTokens            *int64 `json:"output_tokens"`
 	CompletionTokensDetails struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
+		AudioTokens     int64 `json:"audio_tokens"`
 	} `json:"completion_tokens_details"`
 	OutputTokensDetails struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
+		AudioTokens     int64 `json:"audio_tokens"`
 	} `json:"output_tokens_details"`
 	PromptTokensDetails struct {
 		CachedTokens int64 `json:"cached_tokens"`
+		AudioTokens  int64 `json:"audio_tokens"`
 	} `json:"prompt_tokens_details"`
 	InputTokensDetails struct {
 		CachedTokens int64 `json:"cached_tokens"`
+		AudioTokens  int64 `json:"audio_tokens"`
 	} `json:"input_tokens_details"`
 }
 
-// normalize maps either OpenAI wire shape to input, output, reasoning, and
-// cached-input counts, and reports whether any recognized token field was
-// present. OpenAI's prompt/input token count already includes cached tokens.
-func (u *openAIUsage) normalize() (in, out, reasoning, cachedRead int64, present bool) {
+// toUsage maps either OpenAI wire shape (chat/completions or Responses) to a
+// partial policy.Usage, and reports whether any recognized token field was
+// present. Model and ServiceTier are set by the caller. OpenAI's prompt/input
+// token count already includes cached and audio tokens.
+func (u *openAIUsage) toUsage() (policy.Usage, bool) {
+	var out policy.Usage
+	present := false
 	if u.PromptTokens != nil {
-		in, present = *u.PromptTokens, true
+		out.InputTokens, present = *u.PromptTokens, true
 	}
 	if u.InputTokens != nil {
-		in, present = *u.InputTokens, true
+		out.InputTokens, present = *u.InputTokens, true
 	}
 	if u.CompletionTokens != nil {
-		out, present = *u.CompletionTokens, true
+		out.OutputTokens, present = *u.CompletionTokens, true
 	}
 	if u.OutputTokens != nil {
-		out, present = *u.OutputTokens, true
+		out.OutputTokens, present = *u.OutputTokens, true
 	}
-	reasoning = u.CompletionTokensDetails.ReasoningTokens + u.OutputTokensDetails.ReasoningTokens
-	cachedRead = u.PromptTokensDetails.CachedTokens + u.InputTokensDetails.CachedTokens
-	return in, out, reasoning, cachedRead, present
+	out.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens + u.OutputTokensDetails.ReasoningTokens
+	out.CachedReadTokens = u.PromptTokensDetails.CachedTokens + u.InputTokensDetails.CachedTokens
+	out.AudioInputTokens = u.PromptTokensDetails.AudioTokens + u.InputTokensDetails.AudioTokens
+	out.AudioOutputTokens = u.CompletionTokensDetails.AudioTokens + u.OutputTokensDetails.AudioTokens
+	return out, present
 }
 
 // anthropicUsage is the usage block of an Anthropic response or stream event.
@@ -77,17 +86,24 @@ type anthropicUsage struct {
 	OutputTokens             *int64 `json:"output_tokens"`
 	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
-	OutputTokensDetails      struct {
+	CacheCreation            struct {
+		// The TTL breakdown of CacheCreationInputTokens, priced at their own rates.
+		Ephemeral5m int64 `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1h int64 `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
+	OutputTokensDetails struct {
 		// ThinkingTokens is a subset of OutputTokens (Anthropic's extended
 		// thinking), mapped to reasoning so it can be priced at the reasoning rate.
 		ThinkingTokens int64 `json:"thinking_tokens"`
 	} `json:"output_tokens_details"`
 	ServerToolUse struct {
-		// Per-request charges, not tokens: leash cannot price these from the token
-		// table, so their presence is what fails the run closed under a budget.
+		// Per-request charges, not tokens: priced from the table's per-request
+		// rates, or (when unpriced) what fails the run closed under a budget.
 		WebSearchRequests int64 `json:"web_search_requests"`
 		WebFetchRequests  int64 `json:"web_fetch_requests"`
 	} `json:"server_tool_use"`
+	// ServiceTier selects a per-tier price override when set (standard/priority/batch).
+	ServiceTier string `json:"service_tier"`
 }
 
 // present reports whether the block carried any recognized token field.
@@ -96,9 +112,20 @@ func (u *anthropicUsage) present() bool {
 		u.CacheReadInputTokens != nil || u.CacheCreationInputTokens != nil
 }
 
-// serverToolRequests is the total count of billed provider-side tool requests.
-func (u *anthropicUsage) serverToolRequests() int64 {
-	return u.ServerToolUse.WebSearchRequests + u.ServerToolUse.WebFetchRequests
+// toUsage maps the block to a partial policy.Usage; the caller sets Model.
+func (u *anthropicUsage) toUsage() policy.Usage {
+	return policy.Usage{
+		InputTokens:        u.totalInput(),
+		CachedReadTokens:   deref(u.CacheReadInputTokens),
+		CacheWriteTokens:   deref(u.CacheCreationInputTokens),
+		CacheWrite5mTokens: u.CacheCreation.Ephemeral5m,
+		CacheWrite1hTokens: u.CacheCreation.Ephemeral1h,
+		OutputTokens:       deref(u.OutputTokens),
+		ReasoningTokens:    u.OutputTokensDetails.ThinkingTokens,
+		WebSearchRequests:  u.ServerToolUse.WebSearchRequests,
+		WebFetchRequests:   u.ServerToolUse.WebFetchRequests,
+		ServiceTier:        u.ServiceTier,
+	}
 }
 
 // totalInput is the full prompt token count: Anthropic's input_tokens excludes
@@ -176,7 +203,8 @@ func (r *geminiResponse) text() string {
 // chat/completions (choices[].message.content) or Responses
 // (output[].content[].text).
 type openAIResponse struct {
-	Model   string `json:"model"`
+	Model       string `json:"model"`
+	ServiceTier string `json:"service_tier"`
 	Choices []struct {
 		Message struct {
 			Content string `json:"content"`
@@ -225,15 +253,11 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 		}
 		res := Result{Fingerprint: policy.Fingerprint(text.String())}
 		if r.Usage != nil {
-			if in, out, reasoning, cachedRead, present := r.Usage.normalize(); present {
+			if u, present := r.Usage.toUsage(); present {
+				u.Model = r.Model
+				u.ServiceTier = r.ServiceTier
 				res.HasUsage = true
-				res.Usage = policy.Usage{
-					Model:            r.Model,
-					InputTokens:      in,
-					CachedReadTokens: cachedRead,
-					OutputTokens:     out,
-					ReasoningTokens:  reasoning,
-				}
+				res.Usage = u
 			}
 		}
 		return res, nil
@@ -250,16 +274,10 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 		}
 		res := Result{Fingerprint: policy.Fingerprint(text.String())}
 		if r.Usage != nil && r.Usage.present() {
+			u := r.Usage.toUsage()
+			u.Model = r.Model
 			res.HasUsage = true
-			res.Usage = policy.Usage{
-				Model:              r.Model,
-				InputTokens:        r.Usage.totalInput(),
-				CachedReadTokens:   deref(r.Usage.CacheReadInputTokens),
-				CacheWriteTokens:   deref(r.Usage.CacheCreationInputTokens),
-				OutputTokens:       deref(r.Usage.OutputTokens),
-				ReasoningTokens:    r.Usage.OutputTokensDetails.ThinkingTokens,
-				ServerToolRequests: r.Usage.serverToolRequests(),
-			}
+			res.Usage = u
 		}
 		return res, nil
 	case Gemini:

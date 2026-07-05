@@ -589,10 +589,11 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 
 	blind := !result.HasUsage
-	// Provider-side tool requests (e.g. web search) are per-request charges leash
-	// cannot price from the token table, so their presence is billed spend it
-	// cannot account for, handled under the same --on-blind policy as a blind meter.
-	unpriced := result.Usage.ServerToolRequests > 0
+	// Provider-side tool requests (e.g. web search) are per-request charges. When
+	// the table prices them, TokenCost includes them; when it does not, they are
+	// billed spend leash cannot account for, handled under the same --on-blind
+	// policy as a blind meter.
+	unpriced := policy.UnpricedToolActivity(result.Usage, p.cfg.Governor.Prices)
 	callCost := policy.TokenCost(result.Usage, p.cfg.Governor.Prices)
 	switch {
 	case p.cfg.MaxCostPerCall > 0 && callCost > p.cfg.MaxCostPerCall && state.StopReason == "":
@@ -611,7 +612,7 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		// price, so spend went uncounted. Stop the run, same as a blind meter.
 		p.stopRun(recCtx, rs, runID, state, unpricedToolStopReason, at)
 	case unpriced && p.cfg.OnBlind != BlindAllow:
-		p.warnUnpricedTool(runID, result.Usage.ServerToolRequests)
+		p.warnUnpricedTool(runID, result.Usage.ServerToolRequests())
 	}
 	if state.StopReason == "" {
 		p.maybeWarn(rs, state)
