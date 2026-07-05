@@ -545,7 +545,12 @@ flags and `LEASH_*` environment variables only. See
 - [`COMPATIBILITY.md`](COMPATIBILITY.md) - what is treated as a stable contract, and what is not.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - how to build, test, and propose changes.
 
+## Author
+
+Created and maintained by [Sylvester Francis](https://github.com/sylvester-francis).
+
 ## License
 
-[Apache License 2.0](LICENSE). leash depends on
+[Apache License 2.0](LICENSE), with attribution retained per the
+[`NOTICE`](NOTICE) file. leash depends on
 [rerun](https://github.com/sylvester-francis/rerun) for its durable ledger.
