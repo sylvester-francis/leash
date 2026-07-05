@@ -553,7 +553,7 @@ Contributions are welcome, and there are concrete places to start:
 - The open [`roadmap`](https://github.com/sylvester-francis/leash/labels/roadmap), written up plainly in [`docs/known-issues.md`](docs/known-issues.md).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) and the [decision records](docs/adr/) explain how leash is built and why, so a change lands with the grain.
 
-Build and test with the `make` targets in [`CONTRIBUTING.md`](CONTRIBUTING.md); the gate is `test`, `race`, `lint`, `ascii-check`, and `doc-check`. Please sign your commits off (`git commit -s`) to certify the contribution is yours to give. No CLA.
+Substantial changes start with an approved **ADR** before implementation, and pull requests stay focused (a PR over 20 files is blocked); see [`CONTRIBUTING.md`](CONTRIBUTING.md) for both. Build and test with its `make` targets; the gate is `test`, `race`, `lint`, `ascii-check`, and `doc-check`. Please sign your commits off (`git commit -s`) to certify the contribution is yours to give. No CLA.
 
 ## Author
 
