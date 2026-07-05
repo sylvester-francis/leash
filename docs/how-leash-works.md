@@ -125,12 +125,12 @@ stopped with its totals intact and no entry counted twice.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant P as Proxy (process 1)
+    participant P as Proxy 1
     participant J as Journal
-    participant Q as Proxy (process 2)
-    P->>J: append call-0 .. call-(N-1)
+    participant Q as Proxy 2
+    P->>J: append call-0 to call-N
     Note over P: CRASH before the next append
-    Q->>J: Load -> fold -> N calls (not N+1)
+    Q->>J: Load, fold, N calls not N+1
     Q-->>Q: boundary re-evaluated on real totals
 ```
 

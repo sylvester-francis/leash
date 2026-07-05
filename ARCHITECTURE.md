@@ -52,22 +52,22 @@ internal/term    TTY-aware color for the human output
 
 ```mermaid
 sequenceDiagram
-    participant C as Client / agent
+    participant C as Client agent
     participant P as proxy
-    participant L as ledger (journal)
+    participant L as ledger journal
     participant M as meter
     participant U as upstream
 
-    C->>P: POST /v1/chat/completions (X-Loop-Id)
-    P->>L: fold run journal into State (warm cache or cold reload)
-    P->>P: Evaluate boundaries (kill, deadline, cost, calls, rate, stall)
+    C->>P: POST /v1/chat/completions with X-Loop-Id
+    P->>L: fold run journal into State, warm cache or cold reload
+    P->>P: Evaluate boundaries kill, deadline, cost, calls, rate, stall
     alt a boundary tripped
-        P-->>C: 429 leash_boundary {reason, cost}  (run stays stopped)
+        P-->>C: 429 leash_boundary, reason and cost, run stays stopped
     else may proceed
         P->>U: forward the request untouched
-        U-->>P: response (streamed through untouched)
-        P->>M: read usage + fingerprint off the wire
-        P->>L: append the call record (detached context)
+        U-->>P: response, streamed through untouched
+        P->>M: read usage and fingerprint off the wire
+        P->>L: append the call record, detached context
         P->>P: Fold into the warm cache
         P-->>C: the upstream response
     end
