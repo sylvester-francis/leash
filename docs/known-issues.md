@@ -57,6 +57,10 @@ current releases, not overlooked. Each is tracked as a GitHub issue under the
   a boot-reconciliation sweep can close it.
 - **Vertex AI Gemini semantics** ([#62](https://github.com/sylvester-francis/leash/issues/62)).
   leash meters the Gemini API; Vertex reports `candidatesTokenCount` differently.
+- **Gemini API stability watch** ([#68](https://github.com/sylvester-francis/leash/issues/68)).
+  Gemini's native support depends on the `usageMetadata` field names and the
+  candidates-includes-thoughts semantics, which Google may change without notice;
+  tracked so a silent metering regression is caught, not shipped.
 
 Durable governance reactions, native Gemini metering, Anthropic thinking tokens,
 fail-closed pricing of server-side tools, and opt-in priced dimensions (audio,
