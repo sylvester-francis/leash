@@ -27,6 +27,7 @@ is busy, and tears down its servers on exit.
 | `demos/06-per-call-cap-and-blind.sh` | `--max-cost-per-call`, and fail-closed metering (`--on-blind=refuse` vs `warn`). |
 | `demos/07-admin-and-metrics.sh` | `/healthz`, `/readyz`, `leash healthcheck`, and the Prometheus `/metrics`. |
 | `demos/08-soft-limits.sh` | `--warn-at` early warning, and the rate limit as recoverable backpressure (`Retry-After`). |
+| `demos/09-durable-reactions.sh` | `--reactions-db` + `--on-event-exec` - a crash-surviving reaction (command hook) fires off the hot path when a run stops. |
 
 `demos/smoke.sh` is not a showcase - it is the same harness driven as an
 asserting end-to-end test, run by CI to catch regressions in the whole path
@@ -48,3 +49,10 @@ For copy-paste recipes you can adapt to real providers, see
 ```
 
 It is a demo aid, not part of the leash product.
+
+## hooks
+
+[`hooks/on-event.sh`](hooks/on-event.sh) is a reference command hook for
+`leash serve --on-event-exec` (durable reactions). It shows the `LEASH_*`
+environment leash hands a reaction and posts to Slack when `SLACK_WEBHOOK_URL`
+is set. Copy it and make it yours; leash ships no built-in integrations.

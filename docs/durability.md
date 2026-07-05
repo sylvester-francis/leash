@@ -260,3 +260,15 @@ it and gets the same answer. This is why `leash kill` writes two signals - the
 durable journal entry that any reload folds, and the fast cancel flag the warm
 path polls - so a kill is seen within one call whether the governor is warm or
 cold.
+
+## Reactions have their own durability
+
+Escalations are durable separately from the ledger. With `--reactions-db`, a stop
+or warning runs as a rerun workflow on a second, physically separate store, so a
+crash mid-escalation resumes on the next boot instead of losing the alert. This is
+leash's one use of rerun's execution layer (the ledger uses only its storage), and
+it is kept in its own store on purpose: a shared one would let `leash ps` see
+reaction runs and let the reactions recovery scoop up long-lived governance runs.
+The enqueue is asynchronous so the enforcement path never waits, which leaves one
+bounded gap at the enqueue seam. See
+[ADR-0009](adr/0009-durable-governance-reactions.md).

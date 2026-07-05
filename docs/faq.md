@@ -116,6 +116,17 @@ A call is counted at-most-once. The only way to lose one is a crash in the
 narrow window after the upstream responds but before the journal entry commits,
 which undercounts by one and never re-spends.
 
+## Does leash integrate with Slack, PagerDuty, or my ticketing tool?
+
+Not with a built-in connector, on purpose. leash reacts to a stop or a budget
+warning through two sinks: a `--webhook` and an `--on-event-exec` command hook
+(the event arrives in `LEASH_*` environment variables). Point either at your
+tool. With `--reactions-db` set, the reaction is durable: it runs as a retried,
+crash-surviving workflow off the enforcement path, delivered at-least-once. A
+shipped Jira or Slack connector is exactly where leash would stop being small
+enough to audit, so the command hook is the seam instead. See
+[`examples/hooks/on-event.sh`](../examples/hooks/on-event.sh).
+
 ## Can two leash processes govern the same run at once?
 
 Not safely with the default SQLite backend. Its governance lease is

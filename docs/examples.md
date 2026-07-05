@@ -92,6 +92,24 @@ Warnings also increment `leash_budget_warnings_total{reason}` for alerting. The
 rate limit is the one soft boundary: a refused call returns `Retry-After` and the
 run resumes once its window decays, so a client can back off and retry.
 
+## Escalate durably when a run stops
+
+`--webhook` is best-effort. Add `--reactions-db` (a store separate from `--db`)
+to deliver the reaction as a crash-surviving, retried workflow off the
+enforcement path, and `--on-event-exec` to run a local command hook with the
+event in `LEASH_*` environment variables:
+
+```sh
+leash serve --max-cost 50 --prices prices.json \
+  --webhook https://hooks.example.com/leash \
+  --reactions-db /var/lib/leash/reactions.db \
+  --on-event-exec /etc/leash/on-event.sh
+```
+
+Delivery is at-least-once and deduplicated per run, so a retry never
+double-sends. leash ships no connectors; the command hook is how you reach one
+(see [`examples/hooks/on-event.sh`](../examples/hooks/on-event.sh)).
+
 ## Isolate tenants
 
 With auth on, a run id is scoped to the presenting token, so two callers using

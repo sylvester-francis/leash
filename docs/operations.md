@@ -84,6 +84,26 @@ Scrape the `--admin` `/metrics` endpoint. The series worth alerting on:
 The series carry no run-id labels by design (unbounded cardinality). Per-run
 detail comes from `leash ps` and `leash inspect` against the same `--db`.
 
+## Durable reactions
+
+`--webhook` alone is best-effort: a crash mid-delivery or a down endpoint loses
+the event. Add `--reactions-db PATH` (a store separate from `--db`) to make
+reactions crash-surviving: a stop or warning runs as a retried rerun workflow off
+the enforcement path, delivered at-least-once, deduplicated per run, and resumed
+after a restart. `--on-event-exec CMD` adds a local command hook (event data in
+`LEASH_*` environment variables; run with no shell).
+
+- The reactions store holds one short-lived record per stop or warning; size it
+  like a scratch database, not the ledger, and keep it distinct from `--db`.
+- Delivery is gated on the governance lease, so in an active/passive Postgres
+  setup only the active governor delivers; a passive node does not double-fire.
+- `--on-event-exec` runs an operator-supplied program with the gateway's
+  privileges. Treat it as trusted code, and keep it idempotent since delivery is
+  at-least-once.
+- One bounded gap is deliberate: a crash between a stop and the reaction's durable
+  write loses that one reaction (it does not re-fire), so the enforcement path
+  never waits. See [ADR-0009](adr/0009-durable-governance-reactions.md).
+
 ## Standby failover
 
 With a Postgres ledger the governance lease is a cross-process advisory lock, so
