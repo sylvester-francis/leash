@@ -7,7 +7,14 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-04
+
 ### Added
+- Project documentation for contributors and auditors: `ARCHITECTURE.md` (the
+  layering, the request path, the invariants, and a change map), architecture
+  decision records under `docs/adr/`, and `COMPATIBILITY.md` (the stability
+  contract). Property-based tests (stdlib `testing/quick`) and a ledger
+  fault-injection harness now guard the core invariants.
 - The SQLite single-governor lock is now enforced on Windows via `LockFileEx`,
   matching the Unix `flock` guard, so a second `leash serve` on the same SQLite
   ledger is refused rather than silently double-governing. The Windows lock is
@@ -200,7 +207,8 @@ Production hardening and release engineering.
   stream teeing, the wrapper, the standalone gateway, and the `ps`, `inspect`,
   and `kill` commands.
 
-[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/sylvester-francis/leash/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sylvester-francis/leash/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sylvester-francis/leash/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sylvester-francis/leash/compare/v0.2.0...v0.2.1
