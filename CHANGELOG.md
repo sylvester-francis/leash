@@ -7,6 +7,8 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-05
+
 ### Added
 - Opt-in priced dimensions in the price table. Beyond input/output/reasoning and
   the cache rates, a model's price may now set per-request tool rates
@@ -254,7 +256,8 @@ Production hardening and release engineering.
   stream teeing, the wrapper, the standalone gateway, and the `ps`, `inspect`,
   and `kill` commands.
 
-[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/sylvester-francis/leash/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/sylvester-francis/leash/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/sylvester-francis/leash/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sylvester-francis/leash/compare/v0.2.2...v0.2.3
