@@ -205,7 +205,7 @@ func (r *geminiResponse) text() string {
 type openAIResponse struct {
 	Model       string `json:"model"`
 	ServiceTier string `json:"service_tier"`
-	Choices []struct {
+	Choices     []struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`

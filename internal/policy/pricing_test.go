@@ -83,7 +83,7 @@ func TestTokenCostDimensions(t *testing.T) {
 			name:  "audio rate unset falls back to base output rate",
 			usage: Usage{Model: "x", OutputTokens: 1000, AudioOutputTokens: 400},
 			price: Price{OutputPerM: 10}, // no AudioOutputPerM
-			want:  1000 / m * 10,          // all output at the output rate, counted once
+			want:  1000 / m * 10,         // all output at the output rate, counted once
 		},
 	}
 	for _, tt := range tests {
