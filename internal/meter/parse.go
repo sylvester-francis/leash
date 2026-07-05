@@ -99,6 +99,63 @@ func deref(p *int64) int64 {
 	return 0
 }
 
+// geminiUsage is the usageMetadata block of a Gemini generateContent response or
+// stream chunk. Pointers distinguish an absent field from a real zero. On the
+// Gemini API (generativelanguage), candidatesTokenCount already includes any
+// thinking tokens, which are also reported separately in thoughtsTokenCount, so
+// the mapping matches leash's reasoning-is-a-subset-of-output model;
+// cachedContentTokenCount is the cached portion of promptTokenCount. (Vertex AI
+// reports candidatesTokenCount excluding thinking; leash targets the Gemini API.)
+type geminiUsage struct {
+	PromptTokenCount        *int64 `json:"promptTokenCount"`
+	CandidatesTokenCount    *int64 `json:"candidatesTokenCount"`
+	ThoughtsTokenCount      *int64 `json:"thoughtsTokenCount"`
+	CachedContentTokenCount *int64 `json:"cachedContentTokenCount"`
+	TotalTokenCount         *int64 `json:"totalTokenCount"`
+}
+
+// present reports whether the block carried any recognized token field.
+func (u *geminiUsage) present() bool {
+	return u.PromptTokenCount != nil || u.CandidatesTokenCount != nil || u.TotalTokenCount != nil
+}
+
+// toUsage maps usageMetadata onto policy.Usage for the given model.
+func (u *geminiUsage) toUsage(model string) policy.Usage {
+	return policy.Usage{
+		Model:            model,
+		InputTokens:      deref(u.PromptTokenCount),
+		CachedReadTokens: deref(u.CachedContentTokenCount),
+		OutputTokens:     deref(u.CandidatesTokenCount),
+		ReasoningTokens:  deref(u.ThoughtsTokenCount),
+	}
+}
+
+// geminiResponse is a Gemini generateContent response, non-streaming or one SSE
+// chunk (the wire shape is the same). Text arrives in the candidates' parts and
+// the billed model name is modelVersion.
+type geminiResponse struct {
+	ModelVersion string `json:"modelVersion"`
+	Candidates   []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+	UsageMetadata *geminiUsage `json:"usageMetadata"`
+}
+
+// text concatenates the assistant text across the response's candidate parts.
+func (r *geminiResponse) text() string {
+	var b strings.Builder
+	for _, c := range r.Candidates {
+		for _, p := range c.Content.Parts {
+			b.WriteString(p.Text)
+		}
+	}
+	return b.String()
+}
+
 // openAIResponse is a non-streaming OpenAI response in either wire shape:
 // chat/completions (choices[].message.content) or Responses
 // (output[].content[].text).
@@ -185,6 +242,17 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 				CacheWriteTokens: deref(r.Usage.CacheCreationInputTokens),
 				OutputTokens:     deref(r.Usage.OutputTokens),
 			}
+		}
+		return res, nil
+	case Gemini:
+		var r geminiResponse
+		if err := json.Unmarshal(body, &r); err != nil {
+			return Result{}, fmt.Errorf("parse gemini response: %w", err)
+		}
+		res := Result{Fingerprint: policy.Fingerprint(r.text())}
+		if r.UsageMetadata != nil && r.UsageMetadata.present() {
+			res.HasUsage = true
+			res.Usage = r.UsageMetadata.toUsage(r.ModelVersion)
 		}
 		return res, nil
 	default:

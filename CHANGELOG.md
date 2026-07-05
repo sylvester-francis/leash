@@ -7,6 +7,17 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Added
+- Native Gemini metering. leash now reads token usage from Google's Gemini
+  `generateContent` API (`usageMetadata`: prompt / candidates / thoughts / cached
+  content tokens), non-streaming and SSE, mapping thinking tokens onto reasoning
+  so a thinking model is priced once. Detection keys on the `generateContent`
+  path. Gemini's OpenAI-compatible endpoint was already metered as OpenAI; this
+  covers the native API. The meter keys on the wire format, not the model name,
+  so "OpenAI-compatible" already governs Gemini, Ollama, OpenRouter, and others
+  through their OpenAI-compatible endpoints, and no code goes stale on a new model
+  version. See [docs/metering.md](docs/metering.md).
+
 ## [0.2.5] - 2026-07-05
 
 ### Added

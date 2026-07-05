@@ -35,7 +35,7 @@ func FuzzParseUsageJSON(f *testing.F) {
 	f.Add(`null`)
 	f.Add(`[1,2,3]`)
 	f.Fuzz(func(t *testing.T, body string) {
-		for _, p := range []Provider{OpenAI, Anthropic, Unknown} {
+		for _, p := range []Provider{OpenAI, Anthropic, Gemini, Unknown} {
 			_, _ = ParseUsageJSON(p, []byte(body))
 		}
 	})
@@ -52,7 +52,7 @@ func FuzzStreamMeterTee(f *testing.F) {
 	f.Add("")
 	f.Add("data:\n\ndata: [DONE]\n\n")
 	f.Fuzz(func(t *testing.T, stream string) {
-		for _, p := range []Provider{OpenAI, Anthropic} {
+		for _, p := range []Provider{OpenAI, Anthropic, Gemini} {
 			var dst bytes.Buffer
 			m := NewStreamMeter(p)
 			if err := m.Tee(&dst, strings.NewReader(stream)); err != nil {

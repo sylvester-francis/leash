@@ -99,6 +99,8 @@ func (m *StreamMeter) parseLine(line []byte) {
 		m.parseOpenAIData(data)
 	case Anthropic:
 		m.parseAnthropicData(data)
+	case Gemini:
+		m.parseGeminiData(data)
 	}
 }
 
@@ -175,6 +177,25 @@ type anthropicEvent struct {
 		Text string `json:"text"`
 	} `json:"delta"`
 	Usage *anthropicUsage `json:"usage"`
+}
+
+// parseGeminiData handles one Gemini SSE chunk (a GenerateContentResponse).
+// usageMetadata is cumulative across chunks, so the last one seen wins, matching
+// how the final chunk carries the authoritative totals.
+func (m *StreamMeter) parseGeminiData(data []byte) {
+	var c geminiResponse
+	if err := json.Unmarshal(data, &c); err != nil {
+		return
+	}
+	if c.ModelVersion != "" {
+		m.model = c.ModelVersion
+	}
+	m.text.WriteString(c.text())
+	if c.UsageMetadata != nil && c.UsageMetadata.present() {
+		m.hasUsage = true
+		u := c.UsageMetadata.toUsage(m.model)
+		m.input, m.cachedRead, m.output, m.reasoning = u.InputTokens, u.CachedReadTokens, u.OutputTokens, u.ReasoningTokens
+	}
 }
 
 func (m *StreamMeter) parseAnthropicData(data []byte) {

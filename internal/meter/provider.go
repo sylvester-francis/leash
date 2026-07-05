@@ -13,8 +13,11 @@
 // limitations under the License.
 
 // Package meter parses real token usage off provider response wires, in both
-// non-streaming JSON and streaming SSE forms, for OpenAI-compatible and
-// Anthropic APIs. It never estimates tokens: it counts only what the wire
+// non-streaming JSON and streaming SSE forms, for the OpenAI-compatible,
+// Anthropic, and Gemini formats. Because it keys on the wire format rather than a
+// model name, it governs any endpoint that speaks one of these (Gemini and Ollama
+// both expose OpenAI-compatible APIs, for example), and it never goes stale on a
+// new model version. It never estimates tokens: it counts only what the wire
 // reports, and it tees streaming responses to the client byte for byte while
 // reading usage on the side.
 package meter
@@ -36,6 +39,8 @@ const (
 	OpenAI
 	// Anthropic is the Anthropic messages format.
 	Anthropic
+	// Gemini is the Google Gemini generateContent format (native API).
+	Gemini
 )
 
 // String returns the provider name for logs.
@@ -45,6 +50,8 @@ func (p Provider) String() string {
 		return "openai"
 	case Anthropic:
 		return "anthropic"
+	case Gemini:
+		return "gemini"
 	default:
 		return "unknown"
 	}
@@ -74,6 +81,12 @@ func DetectProvider(path string, header http.Header) Provider {
 		return Anthropic
 	case strings.Contains(path, "/completions"), strings.Contains(path, "/responses"):
 		return OpenAI
+	case strings.Contains(strings.ToLower(path), "generatecontent"):
+		// Gemini native: .../models/<model>:generateContent and
+		// :streamGenerateContent (case-insensitive, since streaming capitalizes
+		// the G). Its OpenAI-compatible endpoint uses a /chat/completions path and
+		// is metered as OpenAI above.
+		return Gemini
 	default:
 		return Unknown
 	}

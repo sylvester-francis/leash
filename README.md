@@ -350,7 +350,12 @@ numbers only. Reproduce with `make bench`.
 
 ## Metering the wire
 
-leash reads usage from real responses, in both wire formats and both shapes:
+leash keys on the wire *format*, not the model name, so a new model version needs
+no code change (add a price-table row) and any endpoint speaking a format leash
+knows is governed. "OpenAI-compatible" is the ecosystem's common tongue, so that
+one format already covers **Gemini and Ollama** (through their OpenAI-compatible
+endpoints), OpenRouter, Groq, Together, vLLM, and more. leash reads usage from
+real responses, in three formats and both shapes:
 
 - **OpenAI-compatible:** non-streaming `usage.prompt_tokens` /
   `completion_tokens` / `completion_tokens_details.reasoning_tokens`. Streaming
@@ -359,6 +364,10 @@ leash reads usage from real responses, in both wire formats and both shapes:
 - **Anthropic:** non-streaming `usage.input_tokens` / `output_tokens`. Streaming
   carries input tokens in `message_start` and cumulative output tokens in
   `message_delta`.
+- **Gemini** (native `generateContent`): `usageMetadata.promptTokenCount` /
+  `candidatesTokenCount` / `thoughtsTokenCount` / `cachedContentTokenCount`, with
+  a cumulative `usageMetadata` on the SSE stream. Gemini's OpenAI-compatible
+  endpoint is metered as OpenAI.
 
 For streaming OpenAI requests, leash rewrites the body to set
 `stream_options.include_usage=true` so the final chunk reports usage; turn it off
