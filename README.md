@@ -103,19 +103,24 @@ it.
 
 **3 - leash meters the wire, never a guess.** Token counts come only from what
 the provider reports (`usage` in JSON, a final chunk or `message_delta` in a
-stream). If the wire says nothing, the token meter is blind for that call: leash
-counts zero, warns once, and leans on the boundaries that do not need token
-counts (calls, time, stall, kill).
+stream). If the wire says nothing, the token meter is blind for that call. Under
+a cost budget that is the dangerous case, so leash **fails closed by default**:
+it refuses rather than forward spend it cannot measure (`--on-blind=warn`
+restores the old count-zero-and-continue). With no cost budget, a blind call is
+harmless, and leash leans on the boundaries that need no token counts (calls,
+time, stall, kill).
 
 ## Install
 
 A prebuilt static binary from the [releases](https://github.com/sylvester-francis/leash/releases)
-(linux, darwin, windows on amd64 and arm64), verified against `checksums.txt`:
+(linux, darwin, windows on amd64 and arm64). Every release is cosign-signed and
+ships an SBOM and SLSA build provenance, so you can verify a download before you
+run it (see [verifying a release](docs/security-model.md#verifying-a-release)):
 
 ```sh
 # adjust the version, OS, and arch:
 curl -sSL -o leash.tar.gz \
-  https://github.com/sylvester-francis/leash/releases/download/v0.1.0/leash_0.1.0_linux_amd64.tar.gz
+  https://github.com/sylvester-francis/leash/releases/download/v0.2.5/leash_0.2.5_linux_amd64.tar.gz
 tar xzf leash.tar.gz && ./leash version
 ```
 
@@ -247,8 +252,10 @@ model to dollars per million input, output, and reasoning tokens:
 {"gpt-4o": {"input": 2.5, "output": 10, "reasoning": 0}}
 ```
 
-An unknown model or an absent table means that call's token cost is zero. leash
-never hardcodes a price and never estimates tokens.
+An unknown model or an absent table makes that call's token cost blind. leash
+never hardcodes a price and never estimates tokens, so under a cost budget it
+refuses an unpriceable call by default (fail closed); `--on-blind=warn` keeps the
+old count-zero-and-continue behavior.
 
 The **compute meter** is elapsed wall-clock time times `--compute-rate` (dollars
 per hour, default zero) - the meter for a self-hosted agent whose real cost is
@@ -372,6 +379,8 @@ disables that boundary. Full reference: [`docs/cli-reference.md`](docs/cli-refer
 --stall         identical responses tolerated in a row    (default off)
 --prices        path to a JSON price table                (default none)
 --compute-rate  compute meter in dollars per hour         (default 0)
+--on-blind      unpriceable call: refuse, warn, or allow  (default refuse)
+--warn-at       warn at this fraction of a budget          (default 0.8)
 --upstream      upstream base URL override                (default inferred)
 --db            ledger database path                      (default ~/.leash/leash.db)
 --run           run name; reuse it to resume that budget  (default random)
@@ -384,13 +393,16 @@ disables that boundary. Full reference: [`docs/cli-reference.md`](docs/cli-refer
 --standby       wait for the lease; active/passive HA      (serve only, default off)
 --auth-token    require a matching X-Leash-Token header    (serve only, default off)
 --max-runs      cap concurrently-tracked runs (503 over)   (serve only, default 0)
+--webhook       POST a JSON event on warn or stop          (serve only, default off)
+--reactions-db  durable reactions store, separate from db  (serve only, default off)
+--on-event-exec command hook on warn or stop (LEASH_* env) (serve only, default off)
 ```
 
 Every shared flag also reads a `LEASH_`-prefixed environment variable
 (`--max-cost` reads `LEASH_MAX_COST`, and so on); an explicit flag wins. The
 default cost budget is active only when a price table or compute rate makes a
-meter live; otherwise leash warns, once and loudly, that the token meter is
-blind.
+meter live; without one the token meter is blind, and under a cost budget leash
+fails closed by default (`--on-blind`).
 
 ## Design
 
@@ -424,6 +436,7 @@ leash/
   internal/meter/         provider.go, parse.go, stream.go, inject.go
   internal/ledger/        durable journal on rerun's Store (SQLite default)
   internal/proxy/         proxy.go (enforcement), transport.go (headers, tee)
+  internal/reactions/     durable escalations on rerun's execution layer
   internal/wrap/          child launch, base-url injection, signals, exit codes
   examples/fakeupstream/  a std-lib fake provider for the demo
   tools/doccheck/         std-lib AST walker enforcing godoc on exported symbols
@@ -448,6 +461,12 @@ Anthropic parsing (non-streaming and streaming, including the injected
 header redaction, an unclean-crash resume with no double count, a kill from a
 second process, and a wrapper run where a looping child is cut off at a boundary
 and leash exits 3.
+
+The invariants are also checked as properties over random inputs with the
+standard library's `testing/quick`: the fold is deterministic, cost is monotonic,
+and a call is counted at most once through arbitrary retries. A fault-injection
+harness breaks the ledger at each boundary to prove the fail-closed path, and the
+Windows single-governor lock is exercised on real Windows in CI.
 
 The parsers, which are the attack surface, are also fuzzed with native Go
 fuzzing: the JSON and SSE meters never panic on any input, and the stream tee is
