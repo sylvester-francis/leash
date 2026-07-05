@@ -545,6 +545,16 @@ flags and `LEASH_*` environment variables only. See
 - [`COMPATIBILITY.md`](COMPATIBILITY.md) - what is treated as a stable contract, and what is not.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - how to build, test, and propose changes.
 
+## Contributing
+
+Contributions are welcome, and there are concrete places to start:
+
+- Issues tagged [`good first issue`](https://github.com/sylvester-francis/leash/labels/good%20first%20issue) and [`help wanted`](https://github.com/sylvester-francis/leash/labels/help%20wanted).
+- The open [`roadmap`](https://github.com/sylvester-francis/leash/labels/roadmap), written up plainly in [`docs/known-issues.md`](docs/known-issues.md).
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) and the [decision records](docs/adr/) explain how leash is built and why, so a change lands with the grain.
+
+Build and test with the `make` targets in [`CONTRIBUTING.md`](CONTRIBUTING.md); the gate is `test`, `race`, `lint`, `ascii-check`, and `doc-check`. Please sign your commits off (`git commit -s`) to certify the contribution is yours to give. No CLA.
+
 ## Author
 
 Created and maintained by [Sylvester Francis](https://github.com/sylvester-francis).
