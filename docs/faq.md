@@ -170,11 +170,18 @@ the kill switch is always active and always evaluated first.
 
 ## Which providers are supported?
 
-OpenAI-compatible and Anthropic wire formats, both non-streaming and streaming.
-leash reads usage from `usage.prompt_tokens` / `completion_tokens` (and
-`reasoning_tokens`) for OpenAI, and `usage.input_tokens` / `output_tokens` for
-Anthropic, with the streaming variant of each. It infers the upstream from the
-request, or you set it explicitly with `--upstream`.
+OpenAI-compatible, Anthropic, and Gemini wire formats, both non-streaming and
+streaming. Because leash keys on the wire *format*, not the model name, a new
+model version needs no code change (add a price-table row), and
+"OpenAI-compatible" covers far more than OpenAI: **Gemini and Ollama** through
+their OpenAI-compatible endpoints, plus OpenRouter, Groq, Together, vLLM, and the
+rest of that ecosystem. leash reads usage from `usage.prompt_tokens` /
+`completion_tokens` (plus reasoning, audio, and cached details) for OpenAI,
+`usage.input_tokens` / `output_tokens` (plus thinking, cache-TTL split, and
+server-tool counts) for Anthropic, and `usageMetadata` for Gemini's native
+`generateContent` API. For a local model through Ollama, the honest meter is
+`--compute-rate` (machine time), since tokens are effectively free. It infers the
+upstream from the request, or you set it with `--upstream`.
 
 ## Does leash add latency or buffer my responses?
 

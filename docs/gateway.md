@@ -63,8 +63,9 @@ docs/deployment.md and docs/operations.md.
 ## Pointing a client at it
 
 A client uses leash by setting its SDK base_url to the leash address. leash
-speaks the OpenAI and Anthropic wire formats, so nothing else in the client
-changes.
+speaks the OpenAI, Anthropic, and Gemini wire formats (and, since it keys on the
+format, any OpenAI-compatible endpoint such as Gemini or Ollama), so nothing else
+in the client changes.
 
 OpenAI Python SDK - the base_url ends in `/v1`:
 
