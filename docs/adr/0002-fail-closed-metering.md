@@ -21,6 +21,9 @@ default (`--on-blind=refuse`):
 - A known-provider call that comes back unreadable is delivered once (the upstream
   already billed it) and then the run is stopped, so no further spend goes
   uncounted.
+- The same posture extends to billed activity leash cannot price at all, such as a
+  provider-side tool request (web search) with no per-request rate: the run stops
+  with reason `server_tool_unpriced` until it is priced.
 
 `--on-blind=warn` restores the old count-zero-and-continue behavior for operators
 who want it; `--on-blind=allow` is silent. With no cost budget set, a blind call is

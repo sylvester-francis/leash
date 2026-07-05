@@ -121,9 +121,11 @@ arrives, the stream is blind on tokens but the fingerprint still holds
 - the `text` of every `content[]` block whose `type` is `text` is concatenated
   into the fingerprint
 
-Anthropic reports no reasoning field, so reasoning tokens are zero for this
-format. An absent `usage` object makes the call blind, with the fingerprint
-still taken from the text blocks.
+Anthropic reports extended-thinking tokens in `usage.output_tokens_details.thinking_tokens`,
+which leash maps to reasoning (a subset of output, priced at the reasoning rate);
+it also reads `usage.server_tool_use` request counts and the `cache_creation` TTL
+split. An absent `usage` object makes the call blind, with the fingerprint still
+taken from the text blocks.
 
 ### Streaming SSE
 

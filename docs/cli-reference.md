@@ -110,10 +110,15 @@ input, output, and reasoning tokens:
 ```
 
 `cached_input` and `cache_write` are optional cache rates; an omitted one falls
-back to `input`.
+back to `input`. Further optional per-model fields refine cost when you need them,
+each falling back to a coarser rate: `cache_write_5m` / `cache_write_1h`,
+`audio_input` / `audio_output`, per-request tool rates `web_search_per_request` /
+`web_fetch_per_request`, and per-service-tier overrides under `tiers`. The full
+set and pricing rules are in [cost-model.md](cost-model.md).
 
-An unknown model or an absent table means that call's token cost is zero. See
-[cost-model.md](cost-model.md).
+An unknown model or an absent table makes that call's token cost blind, so under a
+cost budget it fails closed by default (`--on-blind`); a priced provider-side tool
+is metered, an unpriced one fails closed (`server_tool_unpriced`).
 
 ## Environment variables leash sets (wrapper mode)
 
@@ -168,8 +173,10 @@ A refused call returns HTTP 429 with:
 
 `reason` is one of `kill_switch`, `deadline`, `cost_budget`, `max_calls`,
 `rate_limit`, `stall`, `meter_blind` (a call could not be metered under a cost
-budget with `--on-blind=refuse`), or `max_cost_per_call` (a single call exceeded
-`--max-cost-per-call`). Every reason except `rate_limit` stops the run for good,
+budget with `--on-blind=refuse`), `server_tool_unpriced` (a call billed
+provider-side tool requests leash cannot price from the table), or
+`max_cost_per_call` (a single call exceeded `--max-cost-per-call`). Every reason
+except `rate_limit` stops the run for good,
 so every later call returns the same body. `rate_limit` is transient: the call is
 refused with a `Retry-After` header (the window in seconds) and the run keeps
 running, resuming once the trailing window decays.

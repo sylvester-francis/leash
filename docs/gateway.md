@@ -45,7 +45,7 @@ observer seam the CLI wires into the proxy - the same seam the metrics registry
 uses:
 
 ```console
-level=INFO msg=serving version=v0.1.0 addr=:8088 db=/home/you/.leash/leash.db
+level=INFO msg=serving version=v0.2.5 addr=:8088 db=/home/you/.leash/leash.db
 leash: stopped run nightly-batch-7 after 18 calls, $4.10 tokens + $0.91 compute = $5.01 (cost_budget)
 ```
 
@@ -169,8 +169,13 @@ format and forward to the right host. The rule, in order:
 - An `Anthropic-Version` header means Anthropic, whatever the path.
 - Otherwise the path decides: a path containing `/messages` is Anthropic; a path
   containing `/completions` (which covers `/chat/completions`) or `/responses`
-  is OpenAI.
+  is OpenAI; a path containing `generateContent` (case-insensitive, covering
+  `:generateContent` and `:streamGenerateContent`) is Gemini's native API.
 - Anything else is unrecognized.
+
+leash infers a default upstream for OpenAI and Anthropic, but not for Gemini or
+an unrecognized format, so set `--upstream` for those (a Gemini call with no
+upstream is refused rather than sent to the wrong host).
 
 By default the inferred provider also picks the upstream: OpenAI routes to
 `https://api.openai.com`, Anthropic to `https://api.anthropic.com`. An
@@ -189,12 +194,13 @@ traffic to that one host. Set it when you want leash in front of:
 LEASH_AUTH_TOKEN=$(cat token) leash serve --listen :8088 --upstream https://gateway.internal --prices prices.json
 ```
 
-A request leash cannot classify by wire format is still counted as one call and
-still subject to the call, deadline, and kill boundaries. Its token count and its
-content fingerprint are unread - leash reads those only from formats it
-recognizes - so the token-metered boundaries (cost and rate) and stall cannot act
-on it; lean on the call, deadline, and kill boundaries for an unfamiliar
-endpoint.
+A request leash cannot classify by wire format is unmeterable. Under a cost budget
+with the default `--on-blind=refuse`, such a request is refused with 402 before it
+is forwarded, so it never spends uncounted. Without a cost budget (or under
+`--on-blind=warn`/`allow`) it is forwarded and counted as one call, still subject
+to the call, deadline, and kill boundaries; its token count and fingerprint stay
+unread, so the token-metered boundaries (cost and rate) and stall cannot act on
+it. Lean on the call, deadline, and kill boundaries for an unfamiliar endpoint.
 
 ## Secrets pass straight through
 

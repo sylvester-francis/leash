@@ -85,7 +85,7 @@ into a 500 rather than taking the gateway down.
   cannot stop spend on a path it never sees. Do not hand the agent a usable key
   for the real endpoint if the proxy is meant to be the only route.
 - Network eavesdropping between the agent and the proxy. leash does not terminate
-  TLS in v0.1; terminate it at your ingress.
+  TLS; terminate it at your ingress.
 - A hostile `--on-event-exec` command. The reaction command hook is operator-
   supplied code that leash runs with the gateway's privileges (with no shell, and
   only `LEASH_*` event data in its environment). It is trusted by definition;

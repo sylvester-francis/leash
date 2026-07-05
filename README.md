@@ -231,8 +231,10 @@ ships no connectors; the command hook reaches yours. See
 ## The boundaries
 
 Evaluated in this fixed order; the first to trip stops the run. A zero value
-disables a boundary; the kill switch is always active. Full detail and gotchas
-in [`docs/boundaries.md`](docs/boundaries.md).
+disables a boundary; the kill switch is always active. The rate limit is the one
+exception: it is recoverable backpressure, so a rate-tripped call is refused with
+`Retry-After` and the run resumes once the window decays, rather than stopping for
+good. Full detail and gotchas in [`docs/boundaries.md`](docs/boundaries.md).
 
 | Order | Boundary | Flag | Trips when |
 |---|---|---|---|
@@ -451,7 +453,7 @@ Repository layout:
 
 ```
 leash/
-  cmd/leash/              CLI: dispatch + the five subcommands
+  cmd/leash/              CLI: dispatch + the governance subcommands
   internal/policy/        pure core: cost.go, state.go, boundary.go, report.go
   internal/meter/         provider.go, parse.go, stream.go, inject.go
   internal/ledger/        durable journal on rerun's Store (SQLite default)
@@ -475,8 +477,8 @@ make bench        # governed-call, fold, and stream-meter benchmarks
 make mutate       # mutation testing on the deterministic core
 ```
 
-The suite covers each boundary end to end against a fake upstream, OpenAI and
-Anthropic parsing (non-streaming and streaming, including the injected
+The suite covers each boundary end to end against a fake upstream, OpenAI,
+Anthropic, and Gemini parsing (non-streaming and streaming, including the injected
 `include_usage` path and the `--no-inject` blind path), the 429 body shape,
 header redaction, an unclean-crash resume with no double count, a kill from a
 second process, and a wrapper run where a looping child is cut off at a boundary
