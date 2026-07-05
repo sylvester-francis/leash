@@ -21,6 +21,9 @@ coverage.out
 # Build guides are not part of the application and must not be committed.
 *-build-prompt.md
 
+# Draft articles and announcements: kept locally for convenience, not shipped.
+docs/articles/
+
 # GoReleaser build output.
 /dist/
 
