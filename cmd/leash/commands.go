@@ -36,6 +36,7 @@ import (
 	"github.com/sylvester-francis/leash/internal/ledger"
 	"github.com/sylvester-francis/leash/internal/policy"
 	"github.com/sylvester-francis/leash/internal/proxy"
+	"github.com/sylvester-francis/leash/internal/reactions"
 	"github.com/sylvester-francis/leash/internal/term"
 	"github.com/sylvester-francis/leash/internal/wrap"
 )
@@ -227,6 +228,10 @@ func cmdServe(args []string) int {
 		"address for the admin listener serving /healthz, /readyz, /metrics (empty disables)")
 	webhook := fs.String("webhook", envStr("LEASH_WEBHOOK", ""),
 		"URL to POST a JSON event to when a run approaches a budget (--warn-at) or a boundary stops it (empty disables)")
+	reactionsDB := fs.String("reactions-db", envStr("LEASH_REACTIONS_DB", ""),
+		"durable reactions store (a separate SQLite path or postgres:// DSN, distinct from --db); when set, --webhook is delivered durably and --on-event-exec is enabled (empty keeps reactions best-effort)")
+	onEventExec := fs.String("on-event-exec", envStr("LEASH_ON_EVENT_EXEC", ""),
+		"command to run on a stop or warning, with event data in LEASH_* env vars (requires --reactions-db)")
 	standby := fs.Bool("standby", envBool("LEASH_STANDBY", false),
 		"wait for the governance lease instead of erroring when another instance holds it (active/passive HA)")
 	authToken := fs.String("auth-token", envStr("LEASH_AUTH_TOKEN", ""),
@@ -267,6 +272,14 @@ func cmdServe(args []string) int {
 	onBlind, err := parseBlindPolicy(c.onBlind)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leash: %v\n", err)
+		return 2
+	}
+	if *onEventExec != "" && *reactionsDB == "" {
+		fmt.Fprintln(os.Stderr, "leash: --on-event-exec requires --reactions-db (the command hook is a durable reaction)")
+		return 2
+	}
+	if *reactionsDB != "" && *reactionsDB == c.db {
+		fmt.Fprintln(os.Stderr, "leash: --reactions-db must differ from --db; reactions use a separate store")
 		return 2
 	}
 
@@ -313,9 +326,25 @@ func cmdServe(args []string) int {
 		metrics = proxy.NewMetrics(version, g.Prices)
 		observers = append(observers, metrics)
 	}
-	if *webhook != "" {
+	// Durable reactions upgrade the webhook from best-effort to a crash-surviving
+	// rerun workflow and enable the command hook; without --reactions-db the
+	// webhook stays best-effort exactly as before.
+	var reactionDisp *reactions.Dispatcher
+	if *reactionsDB != "" {
+		reactionDisp, err = reactions.NewDispatcher(reactions.Config{
+			DSN: *reactionsDB, WebhookURL: *webhook, Command: *onEventExec,
+			Logger: logger, Now: time.Now,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "leash: %v\n", err)
+			return 1
+		}
+		observers = append(observers, reactionDisp)
+		logger.Info("durable reactions enabled", "db", *reactionsDB,
+			"webhook", *webhook != "", "command", *onEventExec != "")
+	} else if *webhook != "" {
 		observers = append(observers, proxy.NewWebhookNotifier(*webhook, logger, time.Now))
-		logger.Info("webhook notifications enabled", "url", *webhook)
+		logger.Info("webhook notifications enabled (best-effort; set --reactions-db for durable)", "url", *webhook)
 	}
 
 	if *standby {
@@ -349,6 +378,20 @@ func cmdServe(args []string) int {
 		return 1
 	}
 	defer p.Shutdown()
+
+	// The governance lease is now won, so it is safe to resume reactions a crash
+	// left in flight without a passive HA node double-firing. Close parks any
+	// in-flight reaction for the next boot to resume.
+	if reactionDisp != nil {
+		defer func() {
+			cctx, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
+			defer cancel()
+			_ = reactionDisp.Close(cctx)
+		}()
+		if rerr := reactionDisp.Recover(context.Background()); rerr != nil {
+			logger.Warn("reactions recover failed", "err", rerr)
+		}
+	}
 
 	srv := proxy.HardenedServer(*listen, p)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

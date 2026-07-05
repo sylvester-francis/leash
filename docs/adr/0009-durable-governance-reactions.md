@@ -1,6 +1,6 @@
 # ADR-0009: Governance reactions are durable, off the hot path, and integration-free
 
-Status: accepted (implementation follows)
+Status: accepted (implemented in `internal/reactions`)
 
 ## Context
 
