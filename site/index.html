@@ -527,7 +527,7 @@ leash: <span class="stop">stopped</span> run a3f9 after 18 calls,
           <div class="top">
             <div class="k">Tier 2 - serve</div>
             <h3>Point an SDK at it</h3>
-            <p>leash speaks the OpenAI and Anthropic wire formats, so only the base URL changes.</p>
+            <p>leash speaks the OpenAI, Anthropic, and Gemini wire formats, so only the base URL changes. It keys on the format, not the model name, so any OpenAI-compatible endpoint works too - Gemini, Ollama, OpenRouter, and the rest - and a new model needs no update.</p>
           </div>
           <pre><span class="c"># Python, OpenAI SDK</span>
 client = OpenAI(

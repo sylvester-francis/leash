@@ -47,13 +47,26 @@ current releases, not overlooked. Each is tracked as a GitHub issue under the
 - **Hierarchical multi-tenant quotas** ([#21](https://github.com/sylvester-francis/leash/issues/21)).
   Budgets are per run (per credential when auth is on). A quota that nests
   call < run < team < org, with limits at each level, is not modeled yet.
+- **Native Ollama metering** ([#59](https://github.com/sylvester-francis/leash/issues/59)).
+  Ollama is governed via its OpenAI-compatible `/v1` endpoint; its native
+  `/api/chat` usage shape is not parsed.
+- **OpenAI server-side tool pricing** ([#60](https://github.com/sylvester-francis/leash/issues/60)).
+  Per-request tool charges are read and priced for Anthropic; OpenAI's are not yet.
+- **Durable-reaction enqueue-seam sweep** ([#61](https://github.com/sylvester-francis/leash/issues/61)).
+  A crash between a stop and the reaction's durable write loses that one reaction;
+  a boot-reconciliation sweep can close it.
+- **Vertex AI Gemini semantics** ([#62](https://github.com/sylvester-francis/leash/issues/62)).
+  leash meters the Gemini API; Vertex reports `candidatesTokenCount` differently.
 
-Soft limits and backpressure ([#22](https://github.com/sylvester-francis/leash/issues/22)),
+Durable governance reactions, native Gemini metering, Anthropic thinking tokens,
+fail-closed pricing of server-side tools, and opt-in priced dimensions (audio,
+cache-TTL, per-request tools, service tiers) have since shipped, alongside soft
+limits and backpressure ([#22](https://github.com/sylvester-francis/leash/issues/22)),
 richer observability ([#23](https://github.com/sylvester-francis/leash/issues/23)),
 a signed release supply chain ([#24](https://github.com/sylvester-francis/leash/issues/24)),
 the Windows SQLite governor lock ([#25](https://github.com/sylvester-francis/leash/issues/25)),
-and idempotent ledger appends ([#26](https://github.com/sylvester-francis/leash/issues/26))
-have since shipped; see [security-model.md](security-model.md) for verifying a release.
+and idempotent ledger appends ([#26](https://github.com/sylvester-francis/leash/issues/26));
+see [security-model.md](security-model.md) for verifying a release.
 
 Have a use case that one of these blocks? Comment on the issue - it helps
 prioritize.

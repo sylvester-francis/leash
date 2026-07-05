@@ -309,7 +309,8 @@ With no cost budget set, a blind call is harmless to the budget and is allowed;
 the call, deadline, stall, and kill boundaries still hold the run.
 
 Beyond the base counts, leash also reads the detail fields that refine cost:
-OpenAI and Anthropic reasoning/thinking tokens (`completion_tokens_details.reasoning_tokens`,
-`output_tokens_details.thinking_tokens`) map to the reasoning rate, and cache-read
-and cache-write tokens to their own rates. These are all subsets of the base
+reasoning/thinking tokens across OpenAI, Anthropic, and Gemini
+(`completion_tokens_details.reasoning_tokens`, `output_tokens_details.thinking_tokens`,
+Gemini's `thoughtsTokenCount`) map to the reasoning rate, audio tokens and
+cache-read/cache-write (with its 5m/1h TTL split) to their own rates. These are all subsets of the base
 input or output counts, so they refine pricing without ever double-counting.
