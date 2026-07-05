@@ -296,5 +296,20 @@ leash cannot price:
 - `warn` keeps the older behavior: forward the call and warn once per run.
 - `allow` forwards silently.
 
+The same policy covers **billed activity leash cannot price**, not just missing
+usage. A call that reports server-side tool requests (Anthropic
+`server_tool_use.web_search_requests` / `web_fetch_requests`) carries a per-request
+charge that is not a token count and has no entry in the price table, so leash
+cannot account for it. Under a cost budget, `--on-blind` treats it the same way: a
+metered call that also billed such a request is delivered, then the run stops with
+reason `server_tool_unpriced` (or warns, or is allowed). The count is exported as
+`leash_server_tool_requests_total` regardless, so the spend is at least visible.
+
 With no cost budget set, a blind call is harmless to the budget and is allowed;
 the call, deadline, stall, and kill boundaries still hold the run.
+
+Beyond the base counts, leash also reads the detail fields that refine cost:
+OpenAI and Anthropic reasoning/thinking tokens (`completion_tokens_details.reasoning_tokens`,
+`output_tokens_details.thinking_tokens`) map to the reasoning rate, and cache-read
+and cache-write tokens to their own rates. These are all subsets of the base
+input or output counts, so they refine pricing without ever double-counting.

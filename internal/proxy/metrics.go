@@ -47,6 +47,7 @@ type Metrics struct {
 	tokensReason   int64
 	tokenCostUSD   float64
 	blindCalls     int64
+	serverToolReq  int64
 	upstreamErrors int64
 	ledgerErrors   int64
 	budgetWarnings map[string]int64 // reason -> count
@@ -109,6 +110,7 @@ func (m *Metrics) CallForwarded(p meter.Provider, u policy.Usage, blind bool) {
 	m.tokensOutput += u.OutputTokens
 	m.tokensReason += u.ReasoningTokens
 	m.tokenCostUSD += policy.TokenCost(u, m.prices)
+	m.serverToolReq += u.ServerToolRequests
 	if blind {
 		m.blindCalls++
 	}
@@ -186,6 +188,9 @@ func (m *Metrics) WriteTo(w io.Writer, activeRuns int) {
 	b.WriteString("# HELP leash_blind_calls_total Forwarded calls that reported no usage on the wire.\n")
 	b.WriteString("# TYPE leash_blind_calls_total counter\n")
 	fmt.Fprintf(&b, "leash_blind_calls_total %d\n", m.blindCalls)
+	b.WriteString("# HELP leash_server_tool_requests_total Provider-side tool requests (e.g. web search) leash cannot price.\n")
+	b.WriteString("# TYPE leash_server_tool_requests_total counter\n")
+	fmt.Fprintf(&b, "leash_server_tool_requests_total %d\n", m.serverToolReq)
 
 	b.WriteString("# HELP leash_upstream_errors_total Upstream request or read failures.\n")
 	b.WriteString("# TYPE leash_upstream_errors_total counter\n")

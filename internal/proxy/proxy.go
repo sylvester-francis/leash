@@ -68,6 +68,11 @@ const authHeader = "X-Leash-Token"
 // under a cost budget and Config.OnBlind is BlindRefuse.
 const blindStopReason = "meter_blind"
 
+// unpricedToolStopReason is recorded when a call billed provider-side tool
+// requests (e.g. web search) that leash cannot price from the token table, so
+// spend went uncounted. Governed by the same --on-blind policy as blindStopReason.
+const unpricedToolStopReason = "server_tool_unpriced"
+
 // BlindPolicy decides what leash does when it cannot meter a call's cost (an
 // unrecognized provider, or a response whose usage it cannot read) while a cost
 // budget is active. The zero value, BlindRefuse, fails closed.
@@ -584,6 +589,10 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 
 	blind := !result.HasUsage
+	// Provider-side tool requests (e.g. web search) are per-request charges leash
+	// cannot price from the token table, so their presence is billed spend it
+	// cannot account for, handled under the same --on-blind policy as a blind meter.
+	unpriced := result.Usage.ServerToolRequests > 0
 	callCost := policy.TokenCost(result.Usage, p.cfg.Governor.Prices)
 	switch {
 	case p.cfg.MaxCostPerCall > 0 && callCost > p.cfg.MaxCostPerCall && state.StopReason == "":
@@ -597,6 +606,12 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		p.stopRun(recCtx, rs, runID, state, blindStopReason, at)
 	case blind && p.cfg.OnBlind != BlindAllow:
 		p.warnBlind(runID)
+	case unpriced && p.blindRefuses() && state.StopReason == "":
+		// Fail closed: the call billed server-side tool requests leash cannot
+		// price, so spend went uncounted. Stop the run, same as a blind meter.
+		p.stopRun(recCtx, rs, runID, state, unpricedToolStopReason, at)
+	case unpriced && p.cfg.OnBlind != BlindAllow:
+		p.warnUnpricedTool(runID, result.Usage.ServerToolRequests)
 	}
 	if state.StopReason == "" {
 		p.maybeWarn(rs, state)
@@ -758,6 +773,21 @@ func (p *Proxy) warnBlind(runID string) {
 	}
 	p.warnedBlind[runID] = true
 	p.cfg.Logger.Warn("token meter blind (no usage on the wire); relying on other boundaries", "run", runID)
+}
+
+// warnUnpricedTool logs, once per run, that a call billed server-side tool
+// requests leash cannot price, so its spend is under-counted. The "tool:" prefix
+// keeps it distinct from the blind warning in the same per-run map.
+func (p *Proxy) warnUnpricedTool(runID string, requests int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := "tool:" + runID
+	if p.warnedBlind[key] {
+		return
+	}
+	p.warnedBlind[key] = true
+	p.cfg.Logger.Warn("call billed server-side tool requests leash cannot price; spend under-counted",
+		"run", runID, "requests", requests)
 }
 
 // upstreamFor returns the base URL for a provider, preferring the override.

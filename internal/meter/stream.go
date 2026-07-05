@@ -37,6 +37,7 @@ type StreamMeter struct {
 	reasoning  int64
 	cachedRead int64
 	cacheWrite int64
+	serverTool int64
 	text       strings.Builder
 	hasUsage   bool
 }
@@ -71,12 +72,13 @@ func (m *StreamMeter) Tee(dst io.Writer, src io.Reader) error {
 func (m *StreamMeter) Result() Result {
 	return Result{
 		Usage: policy.Usage{
-			Model:            m.model,
-			InputTokens:      m.input,
-			CachedReadTokens: m.cachedRead,
-			CacheWriteTokens: m.cacheWrite,
-			OutputTokens:     m.output,
-			ReasoningTokens:  m.reasoning,
+			Model:              m.model,
+			InputTokens:        m.input,
+			CachedReadTokens:   m.cachedRead,
+			CacheWriteTokens:   m.cacheWrite,
+			OutputTokens:       m.output,
+			ReasoningTokens:    m.reasoning,
+			ServerToolRequests: m.serverTool,
 		},
 		Fingerprint: policy.Fingerprint(m.text.String()),
 		HasUsage:    m.hasUsage,
@@ -223,6 +225,8 @@ func (m *StreamMeter) parseAnthropicData(data []byte) {
 		if e.Usage != nil && e.Usage.present() {
 			m.hasUsage = true
 			m.output = deref(e.Usage.OutputTokens) // Anthropic reports cumulative output.
+			m.reasoning = e.Usage.OutputTokensDetails.ThinkingTokens
+			m.serverTool = e.Usage.serverToolRequests()
 		}
 	}
 }
