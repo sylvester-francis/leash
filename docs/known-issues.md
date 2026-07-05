@@ -18,10 +18,6 @@ docs cover the guarantees that *do* hold.
   OpenAI, or any client with a hard-coded base URL) sends traffic straight past
   leash. Those calls are simply not governed - run such agents through gateway
   mode with an explicit `--upstream`, or govern what you can reach.
-- **The SQLite single-governor lock is Unix-only.** The `flock` guard that stops
-  two `serve` processes from double-governing a SQLite ledger is enforced on
-  Linux and macOS. On Windows, follow the operating rule (one governor per SQLite
-  ledger) or use the Postgres backend, whose lease is a real cross-process lock.
 - **Stall detection is byte-exact.** The stall boundary trips on verbatim
   repeated responses. A loop that varies by a timestamp or an id each turn is
   semantically stuck but not byte-identical, and will not trip it; lean on
@@ -44,12 +40,10 @@ current releases, not overlooked. Each is tracked as a GitHub issue under the
   Budgets are per run (per credential when auth is on). A quota that nests
   call < run < team < org, with limits at each level, is not modeled yet.
 
-The Windows SQLite lock ([#25](https://github.com/sylvester-francis/leash/issues/25))
-is also tracked for a fix.
-
 Soft limits and backpressure ([#22](https://github.com/sylvester-francis/leash/issues/22)),
 richer observability ([#23](https://github.com/sylvester-francis/leash/issues/23)),
 a signed release supply chain ([#24](https://github.com/sylvester-francis/leash/issues/24)),
+the Windows SQLite governor lock ([#25](https://github.com/sylvester-francis/leash/issues/25)),
 and idempotent ledger appends ([#26](https://github.com/sylvester-francis/leash/issues/26))
 have since shipped; see [security-model.md](security-model.md) for verifying a release.
 

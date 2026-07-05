@@ -223,11 +223,12 @@ The lock is tied to the process: a crash releases it for free, so a restart or a
 standby instance re-acquires and resumes. Cross-process reads and writes (`ps`,
 `inspect`, `kill`) take no lease and are unaffected.
 
-This OS lock is enforced on Unix (Linux, macOS). On other platforms (notably
-Windows) leash does not enforce it; there the operating rule stands - one governor
-process per SQLite ledger, or use Postgres. `--standby` requires a Postgres
-`--db` and is refused on SQLite, whose process-local lease cannot coordinate a
-takeover.
+This OS lock is enforced on Unix (Linux, macOS) via `flock` and on Windows via
+`LockFileEx`; both release the lock when the process exits, so a crash frees it
+for free. On any remaining platform (plan9, wasm) leash does not enforce it, and
+the operating rule stands: one governor process per SQLite ledger, or use
+Postgres. `--standby` requires a Postgres `--db` and is refused on SQLite, whose
+process-local lease cannot coordinate a takeover.
 
 For true cross-process mutual exclusion, point `--db` at Postgres:
 
