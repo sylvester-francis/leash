@@ -56,7 +56,9 @@ const (
 // example a concurrent `leash kill`).
 const appendRetries = 8
 
-// Ledger is a durable account backed by a rerun.Store.
+// Ledger is a durable account backed by a rerun.Store. Its methods are safe for
+// concurrent use; the store serializes writes, and appends contend for a journal
+// position through a bounded, idempotent retry (see appendAt).
 type Ledger struct {
 	store  rerun.Store
 	closer io.Closer
