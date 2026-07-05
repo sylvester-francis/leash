@@ -17,3 +17,4 @@ Format: context, the decision, its consequences, and the alternatives weighed.
 | [0006](0006-tenancy-by-credential.md) | Scope runs by the presenting credential when auth is on |
 | [0007](0007-rate-limit-is-transient.md) | The rate limit is backpressure, not a terminal stop |
 | [0008](0008-warm-cache-equals-cold-fold.md) | The warm cache must equal a cold fold of the journal |
+| [0009](0009-durable-governance-reactions.md) | Governance reactions are durable, off the hot path, and integration-free |
