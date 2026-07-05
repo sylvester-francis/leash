@@ -34,6 +34,10 @@ type Sample struct {
 // journal is the source of truth, and State is rebuilt from it by folding each
 // recorded call in order. Time-derived fields (Elapsed, ComputeCost, TotalCost)
 // are set by Refresh; everything else is set by Fold.
+//
+// State is not safe for concurrent use: Fold and Refresh mutate it. The proxy
+// serializes all access to one run's State, so calls for the same run never
+// touch it at once while calls for different runs proceed in parallel.
 type State struct {
 	// RunID is the run this state accounts for.
 	RunID string `json:"run_id"`

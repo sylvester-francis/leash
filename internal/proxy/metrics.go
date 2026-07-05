@@ -31,7 +31,9 @@ import (
 // third-party dependency. Cardinality is bounded by construction: the only
 // labels are the fixed decision, provider, token-kind, and reason sets. There is
 // no run-id label anywhere; run ids are unbounded and per-run data lives in the
-// ledger.
+// ledger. All methods are safe for concurrent use: a mutex guards the counters,
+// so observer events from many in-flight requests and a concurrent /metrics
+// scrape never race.
 type Metrics struct {
 	version string
 	prices  policy.PriceTable

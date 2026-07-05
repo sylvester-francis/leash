@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in leash behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For a question or an idea, please use
+        [Discussions](https://github.com/sylvester-francis/leash/discussions)
+        instead. Never paste API keys, tokens, or request bodies here.
+  - type: input
+    id: version
+    attributes:
+      label: leash version
+      description: The output of `leash version`.
+      placeholder: leash v0.2.3 go1.25.11 darwin/arm64
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got. Redact secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands. A minimal reproduction helps most.
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Ledger backend
+      options:
+        - SQLite
+        - Postgres
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before filing
+      options:
+        - label: I redacted API keys and tokens from any logs and commands above
+          required: true
+        - label: I checked docs/known-issues.md
+          required: true

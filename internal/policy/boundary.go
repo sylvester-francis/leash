@@ -144,6 +144,10 @@ type Limits struct {
 // Governor holds the active boundaries in their fixed evaluation order together
 // with the meters (prices and compute rate) used to refresh cost before each
 // evaluation. It is the single object the proxy consults per call.
+//
+// A Governor is immutable after NewGovernor returns, so it is safe for
+// concurrent use: many runs share one Governor and evaluate against it in
+// parallel. The mutable per-call state lives in State, not here.
 type Governor struct {
 	// ComputeRate is dollars per hour for the compute meter.
 	ComputeRate float64

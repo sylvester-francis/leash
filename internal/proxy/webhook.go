@@ -34,7 +34,8 @@ const (
 // approaches a budget (a warning) or a boundary stops it. Delivery is
 // best-effort and off the request path: events queue on a buffered channel
 // drained by one worker, and a full queue drops the event rather than block a
-// governed call. Embeds NopObserver for the events it does not handle.
+// governed call. Embeds NopObserver for the events it does not handle. Its
+// methods are safe for concurrent use; they only enqueue.
 type WebhookNotifier struct {
 	NopObserver
 	url    string
