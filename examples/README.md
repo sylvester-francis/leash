@@ -28,6 +28,8 @@ is busy, and tears down its servers on exit.
 | `demos/07-admin-and-metrics.sh` | `/healthz`, `/readyz`, `leash healthcheck`, and the Prometheus `/metrics`. |
 | `demos/08-soft-limits.sh` | `--warn-at` early warning, and the rate limit as recoverable backpressure (`Retry-After`). |
 | `demos/09-durable-reactions.sh` | `--reactions-db` + `--on-event-exec` - a crash-surviving reaction (command hook) fires off the hot path when a run stops. |
+| `demos/10-server-tools.sh` | Fail closed on unpriceable tool spend: an Anthropic web search stops the run (`server_tool_unpriced`) under a budget, until you price it (`web_search_per_request`). |
+| `demos/11-gemini.sh` | Native Gemini metering: leash reads `generateContent` `usageMetadata` and enforces a cost budget on a Gemini endpoint. |
 
 `demos/smoke.sh` is not a showcase - it is the same harness driven as an
 asserting end-to-end test, run by CI to catch regressions in the whole path
@@ -38,13 +40,16 @@ For copy-paste recipes you can adapt to real providers, see
 
 ## fakeupstream
 
-`fakeupstream` is a tiny OpenAI-compatible stand-in used by the demos and the
-`docker compose` quickstart. Flags let a demo shape what it reports:
+`fakeupstream` is a tiny stand-in used by the demos and the `docker compose`
+quickstart. It answers all three wire formats leash meters: OpenAI-compatible on
+`/v1/chat/completions`, Anthropic on `/v1/messages`, and Gemini's native
+`generateContent` under `/v1beta/`. Flags let a demo shape what it reports:
 
 ```
 --model, --reply                       identity and content
 --prompt-tokens, --completion-tokens   the usage counts (drive cost)
---reasoning-tokens, --cached-tokens    detail fields (reasoning, prompt cache)
+--reasoning-tokens, --cached-tokens    detail fields (reasoning/thinking, prompt cache)
+--server-tool-requests                 Anthropic server_tool_use web-search count
 --no-usage                             omit usage entirely (the blind path)
 ```
 

@@ -65,6 +65,23 @@ Prices are per million tokens, with optional cache rates:
 }
 ```
 
+Optional per-model fields refine the price when you need them, each falling back
+to a coarser rate: audio, per-TTL cache-write, per-request tool charges, and
+per-service-tier overrides. Each subset is priced exactly once.
+
+```json
+{
+  "claude-sonnet": {
+    "input": 3, "output": 15, "reasoning": 15,
+    "cache_write_5m": 3.75, "cache_write_1h": 6,
+    "web_search_per_request": 0.01,
+    "tiers": {"batch": {"input": 1.5, "output": 7.5}}
+  }
+}
+```
+
+See `examples/demos/10-server-tools.sh` for the tool-pricing behavior end to end.
+
 ## Handle calls leash cannot price
 
 ```sh
@@ -74,6 +91,31 @@ leash serve --max-cost 20 --prices prices.json               # --on-blind=refuse
 # Only warn and keep going (the pre-v0.2 behavior).
 leash serve --max-cost 20 --prices prices.json --on-blind=warn
 ```
+
+"Cannot price" covers billed activity that is not tokens, too: a call that reports
+a server-side tool request (Anthropic `server_tool_use` web search / fetch) with
+no `web_search_per_request` / `web_fetch_per_request` rate fails closed the same
+way (reason `server_tool_unpriced`), until you price the tool or set
+`--on-blind=warn`.
+
+## Govern Gemini, Ollama, or any OpenAI-compatible endpoint
+
+leash keys on the wire format, not the model name, so it governs far more than
+OpenAI and Anthropic. Point `--upstream` at the endpoint and supply prices:
+
+```sh
+# Gemini's native generateContent API (no default upstream, so set it).
+leash serve --max-cost 20 --prices gemini-prices.json \
+  --upstream https://generativelanguage.googleapis.com
+
+# Any OpenAI-compatible endpoint (Gemini's OpenAI-compat URL, OpenRouter, Groq, ...).
+leash serve --max-cost 20 --prices prices.json --upstream https://openrouter.ai/api
+
+# A local model via Ollama: tokens are effectively free, so govern by machine time.
+leash serve --compute-rate 1.50 --deadline 30m --upstream http://localhost:11434
+```
+
+`examples/demos/11-gemini.sh` runs the native-Gemini path end to end offline.
 
 ## Get warned before the cliff
 
