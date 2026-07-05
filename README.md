@@ -216,6 +216,13 @@ than pooled into one budget, and `--admin :9090` for `/healthz`, `/readyz`, and 
 Prometheus `/metrics` endpoint on a separate listener. See
 [`docs/deployment.md`](docs/deployment.md).
 
+When a run stops or nears a budget, `--webhook` posts a JSON event; add
+`--reactions-db` (a store separate from `--db`) to make that reaction durable.
+The webhook and an `--on-event-exec` command hook then run as a crash-surviving,
+retried rerun workflow off the enforcement path, delivered at-least-once. leash
+ships no connectors; the command hook reaches yours. See
+[`docs/cli-reference.md`](docs/cli-reference.md#durable-reactions).
+
 ## The boundaries
 
 Evaluated in this fixed order; the first to trip stops the run. A zero value

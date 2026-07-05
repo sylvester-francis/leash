@@ -7,6 +7,8 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-05
+
 ### Added
 - Durable governance reactions (`--reactions-db`). When set, a run stopping or
   approaching a budget triggers a crash-surviving rerun workflow off the
@@ -17,6 +19,9 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
   Reactions use their own store, distinct from `--db`. This is leash's first use
   of rerun's execution layer (nine symbols, no new dependency); see
   [docs/adr/0009-durable-governance-reactions.md](docs/adr/0009-durable-governance-reactions.md).
+  Ships with a runnable demo (`examples/demos/09-durable-reactions.sh`) and a
+  reference command hook (`examples/hooks/on-event.sh`); the landing page and docs
+  cover it.
 
 ## [0.2.4] - 2026-07-04
 
@@ -218,7 +223,8 @@ Production hardening and release engineering.
   stream teeing, the wrapper, the standalone gateway, and the `ps`, `inspect`,
   and `kill` commands.
 
-[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/sylvester-francis/leash/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/sylvester-francis/leash/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/sylvester-francis/leash/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sylvester-francis/leash/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sylvester-francis/leash/compare/v0.2.1...v0.2.2
