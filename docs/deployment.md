@@ -57,7 +57,7 @@ running as the nonroot uid `65532`. It exposes `:8088`, declares a `/data`
 volume, and defaults to `serve --listen :8088 --db /data/leash.db`.
 
 ```sh
-make docker IMAGE=leash:local        # or: docker build -t leash:local .
+make docker IMAGE=leash:local        # or: docker build -t leash:local -f deployments/Dockerfile .
 
 # The volume must be writable by uid 65532 (the nonroot user in the image).
 docker volume create leash-data
@@ -71,13 +71,13 @@ variables.
 
 ## docker-compose (no-key demo)
 
-`docker-compose.yml` pairs the gateway with the std-lib fake upstream, so a
+`deployments/docker-compose.yml` pairs the gateway with the std-lib fake upstream, so a
 boundary trips end to end with no real key and no spend. The gateway is capped at
 `--max-calls 5`, so the sixth call returns the 429 boundary body; the admin
 listener is on `:9090`.
 
 ```sh
-docker compose up --build
+docker compose -f deployments/docker-compose.yml up --build
 # in another shell:
 for i in $(seq 1 6); do
   curl -s -XPOST localhost:8088/v1/chat/completions \
