@@ -82,7 +82,7 @@ doc-check:
 # Build the distroless container image, stamping the version from git.
 IMAGE ?= leash:dev
 docker:
-	docker build -t $(IMAGE) --build-arg VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) .
+	docker build -t $(IMAGE) -f deployments/Dockerfile --build-arg VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) .
 
 # Fail on any non-ASCII byte in .go and .md files. Tabs and newlines are
 # allowed; everything outside printable ASCII plus tab is rejected.

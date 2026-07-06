@@ -150,7 +150,7 @@ docker run --rm -p 8088:8088 -v leash-data:/data \
   ghcr.io/sylvester-francis/leash:latest \
   serve --listen :8088 --db /data/leash.db --max-cost 20
 
-docker compose up --build   # from a checkout: gateway + fake upstream
+docker compose -f deployments/docker-compose.yml up --build   # from a checkout: gateway + fake upstream
 ```
 
 ## The 60-second demo

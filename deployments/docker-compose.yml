@@ -1,24 +1,29 @@
 # No-key demo: the leash gateway in front of the std-lib fake upstream, so you
 # can watch a boundary trip end to end without a real API key or any spend.
 #
-#   docker compose up --build
+#   docker compose -f deployments/docker-compose.yml up --build
 #   for i in $(seq 1 6); do curl -s -XPOST localhost:8088/v1/chat/completions \
 #       -H 'X-Loop-Id: demo' -d '{"model":"demo-model"}'; echo; done
 #
 # The gateway is capped at --max-calls 5, so the sixth call returns the 429
 # leash_boundary body. Health and metrics are on the admin listener at :9090.
+#
+# Paths are relative to this file's directory (deployments/), so the build
+# context and the fakeupstream source mount both point one level up (..) at the
+# repository root.
 services:
   fakeupstream:
     image: golang:1.25
     working_dir: /src
     volumes:
-      - .:/src:ro
+      - ..:/src:ro
       - gocache:/go
     command: ["go", "run", "./examples/fakeupstream", "--listen", "0.0.0.0:9099"]
 
   leash:
     build:
-      context: .
+      context: ..
+      dockerfile: deployments/Dockerfile
     # --insecure: this is a trusted local demo with no auth. A real deployment
     # sets LEASH_AUTH_TOKEN instead.
     command:
