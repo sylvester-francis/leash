@@ -20,6 +20,13 @@ jobs:
       - name: Install gremlins
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
       - name: Mutation test the deterministic core
-        # .gremlins.yaml sets the efficacy 90 threshold; gremlins exits non-zero
-        # (10) when it is not met, failing the job.
-        run: gremlins unleash ./internal/policy/ ./internal/meter/
+        # `gremlins unleash` takes a single package path, so invoke it once per
+        # package. .gremlins.yaml sets the efficacy 90 threshold; gremlins exits
+        # non-zero (10) when it is not met. Run every package (so the nightly
+        # report always covers both) and fail the job if any misses threshold.
+        run: |
+          rc=0
+          for pkg in ./internal/policy/ ./internal/meter/; do
+            gremlins unleash "$pkg" || rc=$?
+          done
+          exit $rc
