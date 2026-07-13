@@ -229,6 +229,32 @@ type anthropicResponse struct {
 	Usage *anthropicUsage `json:"usage"`
 }
 
+// ollamaResponse is a non-streaming Ollama native API (/api/chat) response.
+// Usage is in prompt_eval_count/eval_count on the final (done:true) message.
+type ollamaResponse struct {
+	Model            string `json:"model"`
+	PromptEvalCount  *int64 `json:"prompt_eval_count"`
+	EvalCount        *int64 `json:"eval_count"`
+	Done             bool   `json:"done"`
+	Message          struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"message"`
+}
+
+// present reports whether the response carried any recognized token field.
+func (r *ollamaResponse) present() bool {
+	return r.PromptEvalCount != nil || r.EvalCount != nil
+}
+
+// toUsage maps the block to a partial policy.Usage; the caller sets Model.
+func (r *ollamaResponse) toUsage() policy.Usage {
+	return policy.Usage{
+		InputTokens:  deref(r.PromptEvalCount),
+		OutputTokens: deref(r.EvalCount),
+	}
+}
+
 // ParseUsageJSON reads usage and assistant text from a complete non-streaming
 // response body for the given provider. A missing usage block yields a blind
 // result (HasUsage false, zero tokens) rather than an error. An Unknown
@@ -289,6 +315,19 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 		if r.UsageMetadata != nil && r.UsageMetadata.present() {
 			res.HasUsage = true
 			res.Usage = r.UsageMetadata.toUsage(r.ModelVersion)
+		}
+		return res, nil
+	case Ollama:
+		var r ollamaResponse
+		if err := json.Unmarshal(body, &r); err != nil {
+			return Result{}, fmt.Errorf("parse ollama response: %w", err)
+		}
+		res := Result{Fingerprint: policy.Fingerprint(r.Message.Content)}
+		if r.present() {
+			u := r.toUsage()
+			u.Model = r.Model
+			res.HasUsage = true
+			res.Usage = u
 		}
 		return res, nil
 	default:

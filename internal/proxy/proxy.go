@@ -97,6 +97,7 @@ const defaultMaxBodyBytes = 10 * 1024 * 1024
 var (
 	openAIUpstream    = &url.URL{Scheme: "https", Host: "api.openai.com"}
 	anthropicUpstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
+	ollamaUpstream    = &url.URL{Scheme: "http", Host: "localhost:11434"}
 )
 
 // Config configures a Proxy. Governor and Ledger are required; the rest have
@@ -801,6 +802,8 @@ func (p *Proxy) upstreamFor(provider meter.Provider) *url.URL {
 		return openAIUpstream
 	case meter.Anthropic:
 		return anthropicUpstream
+	case meter.Ollama:
+		return ollamaUpstream
 	default:
 		return nil
 	}

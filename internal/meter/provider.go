@@ -41,6 +41,8 @@ const (
 	Anthropic
 	// Gemini is the Google Gemini generateContent format (native API).
 	Gemini
+	// Ollama is the Ollama native API format (/api/chat, /api/generate).
+	Ollama
 )
 
 // String returns the provider name for logs.
@@ -52,6 +54,8 @@ func (p Provider) String() string {
 		return "anthropic"
 	case Gemini:
 		return "gemini"
+	case Ollama:
+		return "ollama"
 	default:
 		return "unknown"
 	}
@@ -79,6 +83,8 @@ func DetectProvider(path string, header http.Header) Provider {
 	switch {
 	case strings.Contains(path, "/messages"):
 		return Anthropic
+	case strings.Contains(path, "/api/chat"), strings.Contains(path, "/api/generate"):
+		return Ollama
 	case strings.Contains(path, "/completions"), strings.Contains(path, "/responses"):
 		return OpenAI
 	case strings.Contains(strings.ToLower(path), "generatecontent"):
