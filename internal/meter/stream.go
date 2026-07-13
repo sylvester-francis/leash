@@ -89,6 +89,8 @@ func (m *StreamMeter) parseLine(line []byte) {
 		m.parseAnthropicData(data)
 	case Gemini:
 		m.parseGeminiData(data)
+	case Ollama:
+		m.parseOllamaData(data)
 	}
 }
 
@@ -237,5 +239,26 @@ func (m *StreamMeter) parseAnthropicData(data []byte) {
 				m.usage.ServiceTier = ou.ServiceTier
 			}
 		}
+	}
+}
+
+// parseOllamaData handles one Ollama SSE chunk (/api/chat streaming). Each
+// chunk is a full response object; the last one (done:true) carries the final
+// usage fields (prompt_eval_count/eval_count). Text is accumulated from
+// message.content across all chunks.
+func (m *StreamMeter) parseOllamaData(data []byte) {
+	var c ollamaResponse
+	if err := json.Unmarshal(data, &c); err != nil {
+		return
+	}
+	if c.Model != "" {
+		m.usage.Model = c.Model
+	}
+	m.text.WriteString(c.Message.Content)
+	if c.present() {
+		m.hasUsage = true
+		u := c.toUsage()
+		u.Model = m.usage.Model
+		m.usage = u
 	}
 }

@@ -31,11 +31,12 @@ func FuzzParseUsageJSON(f *testing.F) {
 	f.Add(`{"model":"gpt-4o","choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
 	f.Add(`{"model":"claude-3-5-sonnet","content":[{"type":"text","text":"Hi"}],"usage":{"input_tokens":12,"output_tokens":7}}`)
 	f.Add(`{"model":"gpt-4o","choices":[]}`)
+	f.Add(`{"model":"llama3.2","message":{"content":"hi"},"prompt_eval_count":10,"eval_count":5}`)
 	f.Add(``)
 	f.Add(`null`)
 	f.Add(`[1,2,3]`)
 	f.Fuzz(func(t *testing.T, body string) {
-		for _, p := range []Provider{OpenAI, Anthropic, Gemini, Unknown} {
+		for _, p := range []Provider{OpenAI, Anthropic, Gemini, Ollama, Unknown} {
 			_, _ = ParseUsageJSON(p, []byte(body))
 		}
 	})
@@ -52,7 +53,7 @@ func FuzzStreamMeterTee(f *testing.F) {
 	f.Add("")
 	f.Add("data:\n\ndata: [DONE]\n\n")
 	f.Fuzz(func(t *testing.T, stream string) {
-		for _, p := range []Provider{OpenAI, Anthropic, Gemini} {
+		for _, p := range []Provider{OpenAI, Anthropic, Gemini, Ollama} {
 			var dst bytes.Buffer
 			m := NewStreamMeter(p)
 			if err := m.Tee(&dst, strings.NewReader(stream)); err != nil {
