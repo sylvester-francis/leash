@@ -71,26 +71,30 @@ func (m *StreamMeter) Result() Result {
 	}
 }
 
-// parseLine handles one raw SSE line. Only data lines carry payloads; event,
-// comment, and blank lines are ignored.
+// parseLine handles one raw SSE (or Ollama NDJSON) line. For SSE, only data
+// lines carry payloads; event, comment, and blank lines are ignored. For
+// Ollama's NDJSON, every line is a bare JSON object.
 func (m *StreamMeter) parseLine(line []byte) {
 	const prefix = "data:"
-	if !bytes.HasPrefix(line, []byte(prefix)) {
+	if bytes.HasPrefix(line, []byte(prefix)) {
+		data := bytes.TrimSpace(line[len(prefix):])
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			return
+		}
+		switch m.provider {
+		case OpenAI:
+			m.parseOpenAIData(data)
+		case Anthropic:
+			m.parseAnthropicData(data)
+		case Gemini:
+			m.parseGeminiData(data)
+		case Ollama:
+			m.parseOllamaData(data)
+		}
 		return
 	}
-	data := bytes.TrimSpace(line[len(prefix):])
-	if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
-		return
-	}
-	switch m.provider {
-	case OpenAI:
-		m.parseOpenAIData(data)
-	case Anthropic:
-		m.parseAnthropicData(data)
-	case Gemini:
-		m.parseGeminiData(data)
-	case Ollama:
-		m.parseOllamaData(data)
+	if m.provider == Ollama && len(line) > 0 {
+		m.parseOllamaData(line)
 	}
 }
 
@@ -242,10 +246,11 @@ func (m *StreamMeter) parseAnthropicData(data []byte) {
 	}
 }
 
-// parseOllamaData handles one Ollama SSE chunk (/api/chat streaming). Each
-// chunk is a full response object; the last one (done:true) carries the final
-// usage fields (prompt_eval_count/eval_count). Text is accumulated from
-// message.content across all chunks.
+// parseOllamaData handles one Ollama chunk (/api/chat or /api/generate
+// streaming, NDJSON). Each chunk is a full response object; the last one
+// (done:true) carries the final usage fields (prompt_eval_count/eval_count).
+// Text is accumulated from message.content (/api/chat) or the top-level
+// response field (/api/generate).
 func (m *StreamMeter) parseOllamaData(data []byte) {
 	var c ollamaResponse
 	if err := json.Unmarshal(data, &c); err != nil {
@@ -254,7 +259,7 @@ func (m *StreamMeter) parseOllamaData(data []byte) {
 	if c.Model != "" {
 		m.usage.Model = c.Model
 	}
-	m.text.WriteString(c.Message.Content)
+	m.text.WriteString(c.text())
 	if c.present() {
 		m.hasUsage = true
 		u := c.toUsage()

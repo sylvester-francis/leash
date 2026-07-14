@@ -49,6 +49,7 @@ func FuzzStreamMeterTee(f *testing.F) {
 	f.Add(openAIStream)
 	f.Add(anthropicStream)
 	f.Add(openAIStreamNoUsage)
+	f.Add(ollamaStream)
 	f.Add("data: not json\n\n")
 	f.Add("")
 	f.Add("data:\n\ndata: [DONE]\n\n")

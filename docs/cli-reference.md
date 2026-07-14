@@ -41,7 +41,7 @@ the kill switch is always active.
 | `--stall` | int | off | identical responses tolerated in a row; `0` disables |
 | `--prices` | path | none | JSON price table; without it the token meter is blind |
 | `--compute-rate` | dollars/hour | `0` | compute meter rate |
-| `--upstream` | URL | inferred | upstream base URL override; empty infers per provider |
+| `--upstream` | URL | inferred | upstream base URL override; required for Ollama in gateway mode since it has no default |
 | `--db` | path | `~/.leash/leash.db` | ledger database path |
 | `--run` | name | random | run name; reuse it to resume that budget |
 | `--no-inject` | bool | `false` | do not add `stream_options.include_usage` |

@@ -97,7 +97,6 @@ const defaultMaxBodyBytes = 10 * 1024 * 1024
 var (
 	openAIUpstream    = &url.URL{Scheme: "https", Host: "api.openai.com"}
 	anthropicUpstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
-	ollamaUpstream    = &url.URL{Scheme: "http", Host: "localhost:11434"}
 )
 
 // Config configures a Proxy. Governor and Ledger are required; the rest have
@@ -545,7 +544,7 @@ func (p *Proxy) forward(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(resp.StatusCode)
 
 	var result meter.Result
-	if meter.IsSSE(resp.Header.Get("Content-Type")) {
+	if meter.IsStreamed(resp.Header.Get("Content-Type")) {
 		sm := meter.NewStreamMeter(provider)
 		if teeErr := sm.Tee(newFlushWriter(w), resp.Body); teeErr != nil {
 			p.cfg.Logger.Error("stream tee error", "run", runID, "err", teeErr)
@@ -793,6 +792,8 @@ func (p *Proxy) warnUnpricedTool(runID string, requests int64) {
 }
 
 // upstreamFor returns the base URL for a provider, preferring the override.
+// Ollama has no default upstream; pass --upstream with a host:port to point
+// leash at a running Ollama instance.
 func (p *Proxy) upstreamFor(provider meter.Provider) *url.URL {
 	if p.cfg.Upstream != nil {
 		return p.cfg.Upstream
@@ -802,8 +803,6 @@ func (p *Proxy) upstreamFor(provider meter.Provider) *url.URL {
 		return openAIUpstream
 	case meter.Anthropic:
 		return anthropicUpstream
-	case meter.Ollama:
-		return ollamaUpstream
 	default:
 		return nil
 	}

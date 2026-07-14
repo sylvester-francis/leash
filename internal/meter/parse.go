@@ -229,22 +229,34 @@ type anthropicResponse struct {
 	Usage *anthropicUsage `json:"usage"`
 }
 
-// ollamaResponse is a non-streaming Ollama native API (/api/chat) response.
-// Usage is in prompt_eval_count/eval_count on the final (done:true) message.
+// ollamaResponse is a non-streaming Ollama native API response. For
+// /api/chat the text is in message.content; for /api/generate it is in the
+// top-level response field. Usage is in prompt_eval_count/eval_count on the
+// final (done:true) message.
 type ollamaResponse struct {
-	Model            string `json:"model"`
-	PromptEvalCount  *int64 `json:"prompt_eval_count"`
-	EvalCount        *int64 `json:"eval_count"`
-	Done             bool   `json:"done"`
-	Message          struct {
+	Model           string `json:"model"`
+	PromptEvalCount *int64 `json:"prompt_eval_count"`
+	EvalCount       *int64 `json:"eval_count"`
+	Done            bool   `json:"done"`
+	Message         struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	} `json:"message"`
+	Response string `json:"response"`
 }
 
 // present reports whether the response carried any recognized token field.
 func (r *ollamaResponse) present() bool {
 	return r.PromptEvalCount != nil || r.EvalCount != nil
+}
+
+// text returns the assistant text: message.content for /api/chat, or the
+// top-level response field for /api/generate.
+func (r *ollamaResponse) text() string {
+	if r.Message.Content != "" {
+		return r.Message.Content
+	}
+	return r.Response
 }
 
 // toUsage maps the block to a partial policy.Usage; the caller sets Model.
@@ -322,7 +334,7 @@ func ParseUsageJSON(p Provider, body []byte) (Result, error) {
 		if err := json.Unmarshal(body, &r); err != nil {
 			return Result{}, fmt.Errorf("parse ollama response: %w", err)
 		}
-		res := Result{Fingerprint: policy.Fingerprint(r.Message.Content)}
+		res := Result{Fingerprint: policy.Fingerprint(r.text())}
 		if r.present() {
 			u := r.toUsage()
 			u.Model = r.Model
