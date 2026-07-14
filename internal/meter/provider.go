@@ -13,13 +13,13 @@
 // limitations under the License.
 
 // Package meter parses real token usage off provider response wires, in both
-// non-streaming JSON and streaming SSE forms, for the OpenAI-compatible,
-// Anthropic, and Gemini formats. Because it keys on the wire format rather than a
-// model name, it governs any endpoint that speaks one of these (Gemini and Ollama
-// both expose OpenAI-compatible APIs, for example), and it never goes stale on a
-// new model version. It never estimates tokens: it counts only what the wire
-// reports, and it tees streaming responses to the client byte for byte while
-// reading usage on the side.
+// non-streaming JSON and streaming (SSE or NDJSON) forms, for the
+// OpenAI-compatible, Anthropic, Gemini, and Ollama native formats. Because it
+// keys on the wire format rather than a model name, it governs any endpoint
+// that speaks one of these (Gemini and Ollama both expose OpenAI-compatible
+// APIs, for example), and it never goes stale on a new model version. It never
+// estimates tokens: it counts only what the wire reports, and it tees streaming
+// responses to the client byte for byte while reading usage on the side.
 package meter
 
 import (
@@ -83,7 +83,7 @@ func DetectProvider(path string, header http.Header) Provider {
 	switch {
 	case strings.Contains(path, "/messages"):
 		return Anthropic
-	case strings.Contains(path, "/api/chat"), strings.Contains(path, "/api/generate"):
+	case strings.HasSuffix(path, "/api/chat"), strings.HasSuffix(path, "/api/generate"):
 		return Ollama
 	case strings.Contains(path, "/completions"), strings.Contains(path, "/responses"):
 		return OpenAI
@@ -98,8 +98,10 @@ func DetectProvider(path string, header http.Header) Provider {
 	}
 }
 
-// IsSSE reports whether a response Content-Type is a server-sent event stream,
-// which selects the streaming meter over the JSON meter.
-func IsSSE(contentType string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
+// IsStreamed reports whether a response Content-Type is a streamed format (SSE
+// or NDJSON) that should be routed through the streaming meter rather than
+// buffered and parsed as a complete JSON body.
+func IsStreamed(contentType string) bool {
+	t := strings.ToLower(strings.TrimSpace(contentType))
+	return strings.HasPrefix(t, "text/event-stream") || strings.HasPrefix(t, "application/x-ndjson")
 }

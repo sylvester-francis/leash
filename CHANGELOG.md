@@ -7,6 +7,12 @@ reaches 1.0 (it is pre-1.0 and unstable until then).
 
 ## [Unreleased]
 
+### Added
+- Native Ollama metering for `/api/chat` and `/api/generate` endpoints. The
+  meter now reads `prompt_eval_count` and `eval_count` from Ollama's native
+  NDJSON stream and non-streaming JSON responses, so a local Ollama instance
+  behind the gateway counts its token usage.
+
 ## [0.2.6] - 2026-07-05
 
 ### Added

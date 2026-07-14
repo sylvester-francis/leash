@@ -2,22 +2,22 @@
 
 leash never estimates tokens. It counts only what the provider puts on the
 wire, and when the wire is silent it marks the call blind rather than guess.
-This guide is how that reading works: the three wire formats leash understands
-(OpenAI-compatible, Anthropic, and Gemini), the two shapes each can take (one
-JSON body, or a server-sent-event stream), and the one request rewrite that makes
-an OpenAI stream report its usage at all.
+This guide is how that reading works: the four wire formats leash understands
+(OpenAI-compatible, Anthropic, Gemini, and Ollama), the two shapes each can take
+(one JSON body, or a streamed response -- SSE or NDJSON), and the one request
+rewrite that makes an OpenAI stream report its usage at all.
 
 leash keys on the wire *format*, not the model name, so it does not go stale when
 a provider ships a new model: add a row to your price table and it works. And
 because the OpenAI format is the ecosystem's lingua franca, "OpenAI-compatible"
-covers far more than OpenAI itself, including Gemini and Ollama through their
-OpenAI-compatible endpoints, plus OpenRouter, Groq, Together, vLLM, and the rest.
-The Gemini format below is for Gemini's *native* `generateContent` API; its
-OpenAI-compatible endpoint is metered as OpenAI.
+covers far more than OpenAI itself, including Gemini through its
+OpenAI-compatible endpoint, plus OpenRouter, Groq, Together, vLLM, and the rest.
+The Gemini and Ollama formats below are for their *native* APIs; both also expose
+OpenAI-compatible endpoints that are metered as OpenAI.
 
-The code lives in `internal/meter`: `provider.go` (detection and the `Result`
-type), `parse.go` (non-streaming JSON), `stream.go` (the SSE tee-and-meter), and
-`inject.go` (the request rewrite).
+The code lives in `internal/meter`: `provider.go` (detection, the `Result`
+type, and content-type checks), `parse.go` (non-streaming JSON),
+`stream.go` (the streaming tee-and-meter), and `inject.go` (the request rewrite).
 
 ## What one call produces: Result
 
@@ -41,17 +41,18 @@ and the usage block arrive in different places on the wire.
 
 - An `Anthropic-Version` header wins outright -> Anthropic.
 - Otherwise the path decides: a path containing `/messages` -> Anthropic; a path
-  containing `/completions` or `/responses` -> OpenAI (both `/chat/completions`
-  and `/completions` contain `/completions`); a path containing `generateContent`
+  ending in `/api/chat` or `/api/generate` -> Ollama; a path containing
+  `/completions` or `/responses` -> OpenAI (both `/chat/completions` and
+  `/completions` contain `/completions`); a path containing `generateContent`
   (case-insensitive, covering `:generateContent` and `:streamGenerateContent`) ->
   Gemini.
 - Anything else -> Unknown. leash forwards Unknown requests but does not meter
   them.
 
 Detection selects the format. A separate signal, the *response* `Content-Type`,
-selects the shape: `IsSSE` returns true for a Content-Type that begins with
-`text/event-stream` (trimmed, case-insensitive), which routes the response
-through the streaming meter instead of the JSON meter.
+selects the shape: `IsStreamed` returns true for a Content-Type that begins with
+`text/event-stream` or `application/x-ndjson` (trimmed, case-insensitive), which
+routes the response through the streaming meter instead of the JSON meter.
 
 ## OpenAI wire format
 
@@ -187,6 +188,56 @@ endpoint or price with that difference in mind.
 `usageMetadata`. leash concatenates the text and takes the last `usageMetadata`
 as authoritative, the same last-wins rule as Anthropic's `message_delta`. Gemini
 needs no usage injection: `usageMetadata` is always present.
+
+## Ollama native wire format
+
+This is Ollama's native `/api/chat` and `/api/generate` API. (Ollama's
+OpenAI-compatible endpoint is a `/v1/chat/completions` path and is metered as
+OpenAI.) Usage is in `prompt_eval_count` and `eval_count` on the final chunk.
+Unlike the other providers, Ollama's native API streams NDJSON
+(`Content-Type: application/x-ndjson`) -- one bare JSON object per line, no SSE
+`data:` framing.
+
+### Non-streaming JSON
+
+```json
+{
+  "model": "llama3.2",
+  "message": {"role": "assistant", "content": "Hello there"},
+  "done": true,
+  "prompt_eval_count": 10,
+  "eval_count": 5,
+  "total_duration": 12345
+}
+```
+
+- `prompt_eval_count` -> input tokens
+- `eval_count` -> output tokens
+- the assistant text is `message.content` for `/api/chat`, or the top-level
+  `response` string for `/api/generate`
+
+If `prompt_eval_count` and `eval_count` are both absent, the call is blind
+(`HasUsage` is false) and the fingerprint is still taken from the text.
+
+### Streaming NDJSON
+
+```text
+{"model":"llama3.2","message":{"role":"assistant","content":"Hello"},"done":false}
+{"model":"llama3.2","message":{"role":"assistant","content":" world"},"done":true,"prompt_eval_count":10,"eval_count":3}
+```
+
+Each line is a bare JSON object. leash parses every line for the Ollama provider
+(this is why the tee asserts the teed bytes equal the source exactly -- NDJSON
+must pass through untouched). Usage is read from the final chunk marked
+`"done": true`. If no chunk carries usage fields, the stream is blind on tokens
+but the fingerprint still holds "Hello world".
+
+### Upstream configuration
+
+Ollama has no default upstream; in gateway mode you must pass `--upstream` with
+the host:port of a running Ollama instance (e.g. `--upstream http://localhost:11434`).
+Clients must set `OLLAMA_HOST` to the gateway address to route through the proxy;
+the `serve` docs walk through this setup.
 
 ## The tee: byte for byte, never buffered
 

@@ -47,9 +47,6 @@ current releases, not overlooked. Each is tracked as a GitHub issue under the
 - **Hierarchical multi-tenant quotas** ([#21](https://github.com/sylvester-francis/leash/issues/21)).
   Budgets are per run (per credential when auth is on). A quota that nests
   call < run < team < org, with limits at each level, is not modeled yet.
-- **Native Ollama metering** ([#59](https://github.com/sylvester-francis/leash/issues/59)).
-  Ollama is governed via its OpenAI-compatible `/v1` endpoint; its native
-  `/api/chat` usage shape is not parsed.
 - **OpenAI server-side tool pricing** ([#60](https://github.com/sylvester-francis/leash/issues/60)).
   Per-request tool charges are read and priced for Anthropic; OpenAI's are not yet.
 - **Durable-reaction enqueue-seam sweep** ([#61](https://github.com/sylvester-francis/leash/issues/61)).
@@ -76,6 +73,7 @@ landed in, and [security-model.md](security-model.md) for verifying a release.
 - **Signed release supply chain** ([#24](https://github.com/sylvester-francis/leash/issues/24), closed).
 - **Windows SQLite governor lock** ([#25](https://github.com/sylvester-francis/leash/issues/25), closed).
 - **Idempotent ledger appends** ([#26](https://github.com/sylvester-francis/leash/issues/26), closed).
+- **Native Ollama metering** ([#59](https://github.com/sylvester-francis/leash/issues/59), closed).
 
 Have a use case that one of these blocks? Comment on the issue - it helps
 prioritize.

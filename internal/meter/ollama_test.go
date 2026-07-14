@@ -31,6 +31,9 @@ func TestDetectProviderOllama(t *testing.T) {
 			t.Fatalf("DetectProvider(%q) = %v, want Ollama", path, got)
 		}
 	}
+	if got := DetectProvider("/api/chat/completions", nil); got != OpenAI {
+		t.Fatalf("DetectProvider(/api/chat/completions) = %v, want OpenAI (Open WebUI compat path must not flip to Ollama)", got)
+	}
 	// The OpenAI-compatible Ollama endpoint is a /v1/chat/completions path and
 	// is metered as OpenAI, not Ollama.
 	if got := DetectProvider("/v1/chat/completions", nil); got != OpenAI {
@@ -84,13 +87,9 @@ func TestParseUsageJSONOllamaNoUsageIsBlind(t *testing.T) {
 	}
 }
 
-const ollamaStream = `data: {"model":"llama3.2","created_at":"2024-01-01T00:00:00Z","message":{"role":"assistant","content":"Hello"},"done":false}
-
-data: {"model":"llama3.2","created_at":"2024-01-01T00:00:00Z","message":{"role":"assistant","content":" from"},"done":false}
-
-data: {"model":"llama3.2","created_at":"2024-01-01T00:00:00Z","message":{"role":"assistant","content":" Ollama"},"done":true,"total_duration":12345,"prompt_eval_count":10,"eval_count":3}
-
-`
+// ollamaStream is a real NDJSON stream from Ollama's native /api/chat endpoint.
+// Each line is a bare JSON object; there is no data: prefix.
+const ollamaStream = "{\"model\":\"llama3.2\",\"created_at\":\"2024-01-01T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"done\":false}\n{\"model\":\"llama3.2\",\"created_at\":\"2024-01-01T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\" from\"},\"done\":false}\n{\"model\":\"llama3.2\",\"created_at\":\"2024-01-01T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\" Ollama\"},\"done\":true,\"total_duration\":12345,\"prompt_eval_count\":10,\"eval_count\":3}\n"
 
 func TestStreamMeterOllama(t *testing.T) {
 	var dst bytes.Buffer
@@ -117,9 +116,7 @@ func TestStreamMeterOllama(t *testing.T) {
 }
 
 func TestStreamMeterOllamaNoUsageIsBlind(t *testing.T) {
-	stream := `data: {"model":"llama3.2","message":{"role":"assistant","content":"hi"},"done":true}
-
-`
+	stream := "{\"model\":\"llama3.2\",\"message\":{\"role\":\"assistant\",\"content\":\"hi\"},\"done\":true}\n"
 	var dst bytes.Buffer
 	m := NewStreamMeter(Ollama)
 	if err := m.Tee(&dst, strings.NewReader(stream)); err != nil {
@@ -131,5 +128,61 @@ func TestStreamMeterOllamaNoUsageIsBlind(t *testing.T) {
 	}
 	if res.Usage.TotalTokens() != 0 {
 		t.Fatalf("blind stream usage should be zero, got %+v", res.Usage)
+	}
+}
+
+func TestParseUsageJSONOllamaGenerate(t *testing.T) {
+	body := []byte(`{
+		"model": "llama3.2",
+		"created_at": "2024-01-01T00:00:00Z",
+		"response": "Hello from generate",
+		"done": true,
+		"total_duration": 12345,
+		"prompt_eval_count": 15,
+		"eval_count": 25
+	}`)
+	res, err := ParseUsageJSON(Ollama, body)
+	if err != nil {
+		t.Fatalf("ParseUsageJSON error: %v", err)
+	}
+	if !res.HasUsage {
+		t.Fatalf("HasUsage = false, want true")
+	}
+	want := policy.Usage{
+		Model: "llama3.2", InputTokens: 15, OutputTokens: 25,
+	}
+	if res.Usage != want {
+		t.Fatalf("Usage = %+v, want %+v", res.Usage, want)
+	}
+	if res.Fingerprint != policy.Fingerprint("Hello from generate") {
+		t.Fatalf("Fingerprint = %q, want %q", res.Fingerprint, "Hello from generate")
+	}
+}
+
+// generateStream is a real NDJSON stream from Ollama's /api/generate endpoint.
+// Chunks carry the top-level "response" field, not "message.content".
+const generateStream = "{\"model\":\"llama3.2\",\"created_at\":\"2024-01-01T00:00:00Z\",\"response\":\"Hello\",\"done\":false}\n{\"model\":\"llama3.2\",\"created_at\":\"2024-01-01T00:00:00Z\",\"response\":\" world\",\"done\":true,\"total_duration\":12345,\"prompt_eval_count\":8,\"eval_count\":4}\n"
+
+func TestStreamMeterOllamaGenerate(t *testing.T) {
+	var dst bytes.Buffer
+	m := NewStreamMeter(Ollama)
+	if err := m.Tee(&dst, strings.NewReader(generateStream)); err != nil {
+		t.Fatalf("Tee error: %v", err)
+	}
+	if dst.String() != generateStream {
+		t.Fatalf("streamed bytes were altered: got %q want %q", dst.String(), generateStream)
+	}
+	res := m.Result()
+	if !res.HasUsage {
+		t.Fatalf("HasUsage = false, want true")
+	}
+	want := policy.Usage{
+		Model: "llama3.2", InputTokens: 8, OutputTokens: 4,
+	}
+	if res.Usage != want {
+		t.Fatalf("Usage = %+v, want %+v", res.Usage, want)
+	}
+	if res.Fingerprint != policy.Fingerprint("Hello world") {
+		t.Fatalf("Fingerprint = %q, want %q", res.Fingerprint, "Hello world")
 	}
 }
