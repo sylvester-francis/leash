@@ -383,9 +383,9 @@ four wire formats and both shapes:
   a cumulative `usageMetadata` on the SSE stream. Gemini's OpenAI-compatible
   endpoint is metered as OpenAI.
 - **Ollama** (native `/api/chat` and `/api/generate`): `prompt_eval_count` /
-  `eval_count` on the final NDJSON chunk. The wrapper injects `OLLAMA_HOST` so
-  Ollama SDKs route through the proxy; in gateway mode pass `--upstream` to
-  point at a running Ollama instance.
+  `eval_count` on the final NDJSON chunk. Native Ollama is governed in gateway
+  mode: pass `--upstream` to point at a running Ollama instance and set
+  `OLLAMA_HOST` to the gateway address in clients.
 
 For streaming OpenAI requests, leash rewrites the body to set
 `stream_options.include_usage=true` so the final chunk reports usage; turn it off
