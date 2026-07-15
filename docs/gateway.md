@@ -107,6 +107,19 @@ curl http://leash-host:8088/v1/chat/completions \
   -d '{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}'
 ```
 
+Ollama native API - the server needs `--upstream` and the client sets
+`OLLAMA_HOST`:
+
+```sh
+leash serve --listen :8088 --upstream http://localhost:11434
+```
+
+```python
+import ollama
+client = ollama.Client(host="http://localhost:8088")
+client.chat(model="llama3.2", messages=[{"role": "user", "content": "hello"}])
+```
+
 ## Run identity is explicit here
 
 In the wrapper, leash chooses a run id and holds it for the child's lifetime. In
@@ -170,7 +183,8 @@ format and forward to the right host. The rule, in order:
 - Otherwise the path decides: a path containing `/messages` is Anthropic; a path
   containing `/completions` (which covers `/chat/completions`) or `/responses`
   is OpenAI; a path containing `generateContent` (case-insensitive, covering
-  `:generateContent` and `:streamGenerateContent`) is Gemini's native API.
+  `:generateContent` and `:streamGenerateContent`) is Gemini's native API;
+  a path ending in `/api/chat` or `/api/generate` is Ollama's native API.
 - Anything else is unrecognized.
 
 leash infers a default upstream for OpenAI and Anthropic, but not for Gemini or

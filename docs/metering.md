@@ -237,7 +237,13 @@ but the fingerprint still holds "Hello world".
 Ollama has no default upstream; in gateway mode you must pass `--upstream` with
 the host:port of a running Ollama instance (e.g. `--upstream http://localhost:11434`).
 Clients must set `OLLAMA_HOST` to the gateway address to route through the proxy;
-the `serve` docs walk through this setup.
+the `serve` docs walk through this setup in
+[the gateway guide](gateway.md#pointing-a-client-at-it).
+
+Ollama management endpoints (`/api/tags`, `/api/show`, `/api/version`) detect as
+Unknown (their paths do not match `/api/chat` or `/api/generate`) and fail closed
+under a cost budget, so a client that lists models through the gateway sees 402s;
+only `/api/chat` and `/api/generate` are governed.
 
 ## The tee: byte for byte, never buffered
 
